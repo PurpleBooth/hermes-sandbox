@@ -29,8 +29,10 @@ fix:
 fmt:
     uv run ruff format .
 
-# End-to-end specdown tests (build → install → import lifecycle).
-# Installs specdown if not on PATH, then runs the markdown specs in specs/.
+# End-to-end specdown tests (invokes `hermes vm-sandbox` CLI via a throwaway
+# HERMES_HOME).  Installs specdown if not on PATH, then runs the specs in docs/.
+# Cloud tokens (HCLOUD_TOKEN, DIGITALOCEAN_TOKEN) are forwarded from the
+# environment — when absent, the corresponding provider task spec is skipped.
 specdown:
     @command -v specdown >/dev/null 2>&1 || { \
         echo "specdown not found — installing latest release to a temp dir"; \
@@ -39,10 +41,10 @@ specdown:
             -o "$$dir/specdown"; \
         chmod +x "$$dir/specdown"; \
         export PATH="$$dir:$$PATH"; \
-        specdown run --temporary-workspace-dir specs/*.md; \
+        ./test-harness/specdown; \
         exit $$?; \
     }
-    specdown run --temporary-workspace-dir specs/*.md
+    ./test-harness/specdown
 
 # Full gate: lint + test + end-to-end (run before pushing/releasing)
 check: lint test specdown

@@ -115,9 +115,7 @@ def get_provider(name: str, **kwargs: Any) -> CloudProvider:
     try:
         cls = _REGISTRY[name]
     except KeyError as exc:
-        raise KeyError(
-            f"Unknown cloud provider {name!r}. Registered: {sorted(_REGISTRY)}"
-        ) from exc
+        raise KeyError(f"Unknown cloud provider {name!r}. Registered: {sorted(_REGISTRY)}") from exc
     return cls(**kwargs)
 
 
@@ -136,7 +134,9 @@ class FakeProvider(CloudProvider):
 
     name = "fake"
 
-    def __init__(self, provision_delay: float = 0.0) -> None:
+    def __init__(self, token: str = "", provision_delay: float = 0.0) -> None:
+        # ``token`` is accepted (and ignored) so ``get_provider(name, token=…)``
+        # works uniformly across real and fake providers.
         self._vms: dict[str, VMInstance] = {}
         self._counter = 0
         self.calls: list[dict[str, Any]] = []

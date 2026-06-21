@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#
+# test-harness/specdown — wraps specdown with a throwaway HERMES_HOME that
+# has the vm-sandbox plugin enabled, so specs can invoke `hermes vm-sandbox`
+# exactly like a real user would.
+#
+# Cloud provider tokens are forwarded from the caller's environment so the
+# Hetzner and DigitalOcean task specs can provision real VMs.  When a token
+# is absent, the corresponding task spec is simply not passed to specdown.
+#
+# Usage: ./test-harness/specdown [spec-files...]
+#        (defaults to docs/references/*.md + applicable docs/tasks/*.md)
+
+set -euo pipefail
+
+REPOSITORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TEMPORARY_HOME="$(mktemp -d)"
+trap 'rm -rf "$TEMPORARY_HOME"' EXIT
+
+# Set up an isolated Hermes home with the plugin symlinked in.
+mkdir -p "$TEMPORARY_HOME/plugins"
+ln -s "$REPOSITORY_DIR/vm_sandbox" "$TEMPORARY_HOME/plugins/vm-sandbox"
+
+export HERMES_HOME="$TEMPORARY_HOME"
+hermes plugins enable vm-sandbox >/dev/null
+hermes config set terminal.backend ssh >/dev/null
+
+# Build the spec file list.  The fake provider and reference specs always
+# run.  The Hetzner and DigitalOcean task specs only run when their tokens
+# are available — otherwise they'd fail on the provision step.
+SPECS=(docs/references/*.md docs/tasks/fake-provider.md)
+
+if [ -n "${HCLOUD_TOKEN:-}" ]; then
+    SPECS+=(docs/tasks/hetzner-provider.md)
+else
+    echo "HCLOUD_TOKEN not set — skipping Hetzner provider task spec"
+fi
+
+if [ -n "${DIGITALOCEAN_TOKEN:-${DO_API_TOKEN:-}}" ]; then
+    SPECS+=(docs/tasks/digitalocean-provider.md)
+else
+    echo "DIGITALOCEAN_TOKEN not set — skipping DigitalOcean provider task spec"
+fi
+
+# Override with explicit arguments if provided.
+if [ $# -gt 0 ]; then
+    SPECS=("$@")
+fi
+
+# Forward HERMES_HOME and any cloud tokens to every script block.
+# Unset VM_SANDBOX_PROVIDER so specs that test the "not configured" state
+# don't pick up a stale value from the caller's environment — specs that
+# need it set it inline (e.g. VM_SANDBOX_PROVIDER=fake hermes vm-sandbox ...).
+ENV_ARGS=(
+    --env "HERMES_HOME=$TEMPORARY_HOME"
+    --unset-env VM_SANDBOX_PROVIDER
+)
+
+# Forward cloud tokens if present in the caller's environment.
+for var in HCLOUD_TOKEN DIGITALOCEAN_TOKEN DO_API_TOKEN; do
+    eval "val=\${${var}:-}"
+    if [ -n "$val" ]; then
+        ENV_ARGS+=(--env "${var}=${val}")
+    fi
+done
+
+exec specdown run \
+    --temporary-workspace-dir \
+    "${ENV_ARGS[@]}" \
+    "${SPECS[@]}"

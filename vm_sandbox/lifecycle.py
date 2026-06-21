@@ -33,7 +33,7 @@ from .ssh_util import KeyPair, chmod_private_key, generate_keypair
 logger = logging.getLogger(__name__)
 
 STATE_FILENAME = "state.json"
-DEFAULT_INSTANCE_TYPE = "cx22"
+DEFAULT_INSTANCE_TYPE = "cx23"
 DEFAULT_REGION = "nbg1"
 DEFAULT_IMAGE = "ubuntu-24.04"
 DEFAULT_SSH_USER = "root"
@@ -198,17 +198,17 @@ class VMLifecycleManager:
                 if vm.is_running() and vm.preferred_ip():
                     logger.info(
                         "vm-sandbox: reusing existing VM %s (%s)",
-                        vm.id, vm.preferred_ip(),
+                        vm.id,
+                        vm.preferred_ip(),
                     )
                     # Touch last_used.
                     state["last_used"] = self._clock()
-                    self.state_path.write_text(
-                        json.dumps(state, indent=2), encoding="utf-8"
-                    )
+                    self.state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
                     return vm
                 logger.info(
                     "vm-sandbox: recorded VM %s not running (status=%s) — reprovisioning",
-                    vm.id, vm.status,
+                    vm.id,
+                    vm.status,
                 )
             except Exception as exc:
                 logger.info("vm-sandbox: recorded VM unreachable (%s) — reprovisioning", exc)

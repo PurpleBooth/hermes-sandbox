@@ -13,7 +13,7 @@ Configuration (env vars; put secrets in ``~/.hermes/.env``):
   HCLOUD_TOKEN                 Hetzner Cloud API token  (hetzner)
   DIGITALOCEAN_TOKEN           DigitalOcean API token   (digitalocean)
                                (DO_API_TOKEN also accepted)
-  VM_SANDBOX_INSTANCE_TYPE     e.g. cx22 / s-2vcpu-4gb  (provider default)
+  VM_SANDBOX_INSTANCE_TYPE     e.g. cx23 / s-2vcpu-4gb  (provider default)
   VM_SANDBOX_REGION            e.g. nbg1 / fra1         (provider default)
   VM_SANDBOX_IMAGE             e.g. ubuntu-24.04        (provider default)
   VM_SANDBOX_SSH_USER          default: root
@@ -64,6 +64,7 @@ def _build_manager() -> VMLifecycleManager | None:
         logger.warning("vm-sandbox: cannot build provider %r: %s", config.provider_name, exc)
         return None
     from hermes_constants import get_hermes_home
+
     return VMLifecycleManager(provider=provider, config=config, hermes_home=get_hermes_home())
 
 
@@ -90,7 +91,8 @@ def _apply_ssh_env(manager: VMLifecycleManager) -> None:
     os.environ.setdefault("TERMINAL_SSH_PERSISTENT", "true")
     logger.info(
         "vm-sandbox: terminal backend -> ssh %s@%s",
-        os.environ["TERMINAL_SSH_USER"], host,
+        os.environ["TERMINAL_SSH_USER"],
+        host,
     )
 
 
@@ -164,6 +166,11 @@ def _handle_slash(raw_args: str) -> str | None:
         return _HELP
     sub = argv[0]
 
+    # `enable` and `available` work without a configured provider — they
+    # only touch config.yaml / the provider registry, not a live VM.
+    if sub == "enable":
+        return _enable_ssh_backend()
+
     manager = _manager_or_build()
     if manager is None:
         return (
@@ -192,9 +199,6 @@ def _handle_slash(raw_args: str) -> str | None:
             return "[vm-sandbox] No log file yet."
         return path.read_text(encoding="utf-8", errors="replace")[-4000:]
 
-    if sub == "enable":
-        return _enable_ssh_backend()
-
     return f"Unknown subcommand: {sub}\n\n{_HELP}"
 
 
@@ -202,6 +206,7 @@ def _enable_ssh_backend() -> str:
     """Set terminal.backend=ssh via the hermes CLI config."""
     try:
         from hermes_cli.config import set_config_value
+
         set_config_value("terminal.backend", "ssh")
         return "[vm-sandbox] Set terminal.backend=ssh. Restart Hermes to apply."
     except Exception as exc:
@@ -226,6 +231,7 @@ def _handle_cli(args: argparse.Namespace) -> int:
     action = getattr(args, "vm_sandbox_action", None) or "status"
     if action == "available":
         from .provider import available_providers
+
         print("Registered providers: " + ", ".join(available_providers()))
         return 0
     # Reuse the slash handler for the common ops.

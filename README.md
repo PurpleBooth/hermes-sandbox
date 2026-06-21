@@ -24,7 +24,7 @@ Hermes' existing `ssh` backend — no core changes, no monkeypatching.
 
 | Provider | `VM_SANDBOX_PROVIDER` | Token env var | Default region | Default size |
 |---|---|---|---|---|
-| Hetzner Cloud | `hetzner` | `HCLOUD_TOKEN` | `nbg1` | `cx22` |
+| Hetzner Cloud | `hetzner` | `HCLOUD_TOKEN` | `nbg1` | `cx23` |
 | DigitalOcean | `digitalocean` | `DIGITALOCEAN_TOKEN` (or `DO_API_TOKEN`) | `fra1` | `s-2vcpu-4gb` |
 
 Both providers enable IPv4 **and** IPv6; SSH prefers the IPv6 address when
@@ -49,7 +49,7 @@ hermes vm-sandbox enable     # or: hermes config set terminal.backend ssh
 ```bash
 VM_SANDBOX_PROVIDER=hetzner              # hetzner | digitalocean
 HCLOUD_TOKEN=...                         # or DIGITALOCEAN_TOKEN / DO_API_TOKEN
-VM_SANDBOX_INSTANCE_TYPE=cx22            # provider-specific
+VM_SANDBOX_INSTANCE_TYPE=cx23            # provider-specific
 VM_SANDBOX_REGION=nbg1                   # provider-specific
 VM_SANDBOX_IMAGE=ubuntu-24.04            # provider-specific
 VM_SANDBOX_SSH_USER=root                 # default root (cloud images)
