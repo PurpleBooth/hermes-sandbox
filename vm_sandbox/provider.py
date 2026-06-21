@@ -23,6 +23,27 @@ from typing import Any
 RequestFn = Callable[..., dict[str, Any]]
 
 
+class ApiError(RuntimeError):
+    """A structured REST API failure.
+
+    Raised by REST providers' ``_request`` when the cloud API returns a non-2xx
+    status.  Carries the HTTP status code so callers (e.g. teardown idempotency)
+    can branch on it without parsing the error message string.  Subclasses
+    :class:`RuntimeError` so existing ``except RuntimeError`` sites still catch
+    it.
+    """
+
+    def __init__(self, method: str, path: str, status_code: int, detail: str = "") -> None:
+        self.method = method
+        self.path = path
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(
+            f"{method} {path} failed: HTTP {status_code}"
+            + (f" {detail}" if detail else "")
+        )
+
+
 @dataclass(frozen=True)
 class VMInstance:
     """A provider-agnostic description of a running (or provisioning) VM."""

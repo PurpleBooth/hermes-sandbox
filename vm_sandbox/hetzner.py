@@ -22,6 +22,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .provider import (
+    ApiError,
     CloudProvider,
     RequestFn,
     VMInstance,
@@ -62,9 +63,7 @@ def _request(
         detail = ""
         with contextlib.suppress(Exception):
             detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"Hetzner API {method} {path} failed: HTTP {exc.code} {detail}"
-        ) from exc
+        raise ApiError(method, path, status_code=exc.code, detail=detail) from exc
 
 
 def _extract_ip(pub_net: dict[str, Any], key: str) -> str:
@@ -209,9 +208,9 @@ class HetznerProvider(CloudProvider):
     def teardown(self, vm_id: str) -> None:
         try:
             self._request("DELETE", f"/servers/{vm_id}", self.token)
-        except RuntimeError as exc:
-            # 404 / "not found" is a successful teardown.
-            if "HTTP 404" in str(exc) or "not_found" in str(exc).lower():
+        except ApiError as exc:
+            # 404 (already gone) is a successful teardown; anything else propagates.
+            if exc.status_code == 404:
                 return
             raise
 

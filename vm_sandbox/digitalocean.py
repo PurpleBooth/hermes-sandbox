@@ -23,6 +23,7 @@ from dataclasses import replace
 from typing import Any
 
 from .provider import (
+    ApiError,
     CloudProvider,
     RequestFn,
     VMInstance,
@@ -61,9 +62,7 @@ def _request(
         detail = ""
         with contextlib.suppress(Exception):
             detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"DigitalOcean API {method} {path} failed: HTTP {exc.code} {detail}"
-        ) from exc
+        raise ApiError(method, path, status_code=exc.code, detail=detail) from exc
 
 
 def _public_ipv4(droplet: dict[str, Any]) -> str:
@@ -191,8 +190,9 @@ class DigitalOceanProvider(CloudProvider):
     def teardown(self, vm_id: str) -> None:
         try:
             self._request("DELETE", f"/droplets/{vm_id}", self.token)
-        except RuntimeError as exc:
-            if "HTTP 404" in str(exc) or "not_found" in str(exc).lower():
+        except ApiError as exc:
+            # 404 (already gone) is a successful teardown; anything else propagates.
+            if exc.status_code == 404:
                 return
             raise
 
