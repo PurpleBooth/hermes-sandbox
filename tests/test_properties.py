@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import dataclasses
 import os
+from pathlib import Path
+from tempfile import mkdtemp
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from vm_sandbox.lifecycle import SandboxConfig
+from vm_sandbox.lifecycle import JsonStateRepository, SandboxConfig, SandboxState
 from vm_sandbox.provider import VMInstance, poll_until
 
 # A non-empty text strategy for identifiers / values that must be meaningful.
@@ -157,3 +159,39 @@ def test_poll_until_always_raises_on_timeout():
     with pytest.raises(TimeoutError):
         poll_until(lambda: False, interval=0, timeout=1,
                    sleep=lambda _: None, clock=lambda: next(ticks))
+
+
+# ── SandboxState: typed persistence roundtrip ──────────────────────────────
+
+
+_state_strategy = st.builds(
+    SandboxState,
+    vm_id=nonempty_text,
+    provider=nonempty_text,
+    name=nonempty_text,
+    region=nonempty_text,
+    public_ip=ip_text,
+    public_ipv6=st.text(alphabet=_safe_chars, max_size=40),
+    ssh_host=ip_text,
+    ssh_user=nonempty_text,
+    created_at=st.floats(min_value=0.0, max_value=1e12, allow_nan=False, allow_infinity=False),
+    last_used=st.floats(min_value=0.0, max_value=1e12, allow_nan=False, allow_infinity=False),
+)
+
+
+@given(_state_strategy)
+def test_json_state_repository_save_load_roundtrip(state):
+    """save() then load() returns an equal SandboxState for any value."""
+    repo = JsonStateRepository(Path(mkdtemp()))
+    repo.save(state)
+    assert repo.load() == state
+
+
+@given(_state_strategy)
+def test_sandbox_state_touched_advances_last_used_only(state):
+    """touched(now) preserves every field except last_used."""
+    touched = state.touched(123.0)
+    assert touched.last_used == 123.0
+    for field in dataclasses.fields(state):
+        if field.name != "last_used":
+            assert getattr(touched, field.name) == getattr(state, field.name)
