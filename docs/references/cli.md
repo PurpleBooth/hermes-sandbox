@@ -30,7 +30,8 @@ VM_SANDBOX_PROVIDER=fake hermes vm-sandbox status
 [vm-sandbox] No sandbox VM recorded.
 ```
 
-When the plugin is not configured (no provider / token):
+When the plugin is not configured (no provider / token set), it tells you
+how to fix that:
 
 ```shell,script(name="status-unconfigured", expected_exit_code=0)
 hermes vm-sandbox status
@@ -54,8 +55,7 @@ VM_SANDBOX_PROVIDER=fake hermes vm-sandbox provision
 
 ## Teardown
 
-Destroy the recorded sandbox VM.  Returns a confirmation, or a notice if
-there was nothing to tear down.
+Destroy the recorded sandbox VM.
 
 ```shell,script(name="teardown", expected_exit_code=0)
 VM_SANDBOX_PROVIDER=fake hermes vm-sandbox teardown
@@ -65,7 +65,7 @@ VM_SANDBOX_PROVIDER=fake hermes vm-sandbox teardown
 [vm-sandbox] VM torn down.
 ```
 
-Tearing down when no VM exists is a no-op:
+If there is no VM to tear down, it says so:
 
 ```shell,script(name="teardown-none", expected_exit_code=0)
 VM_SANDBOX_PROVIDER=fake hermes vm-sandbox teardown
@@ -78,7 +78,7 @@ VM_SANDBOX_PROVIDER=fake hermes vm-sandbox teardown
 ## Enable
 
 Set `terminal.backend=ssh` in config.yaml so Hermes' ssh terminal backend is
-the stable default.  This is run once during initial setup.
+the stable default.  Run this once during initial setup.
 
 ```shell,script(name="enable", expected_exit_code=0)
 hermes vm-sandbox enable | grep '^\[vm-sandbox\]'

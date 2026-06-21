@@ -1,24 +1,13 @@
-# Task: DigitalOcean Provider Lifecycle
+# Task: Sandbox VM with DigitalOcean
 
-This task demonstrates the full provision → use → teardown cycle with
-DigitalOcean.  It provisions a real droplet, verifies it is recorded,
-and tears it down.
+Provision a real DigitalOcean droplet as your Hermes sandbox, run commands
+on it, then tear it down when you are done.
 
-The `DIGITALOCEAN_TOKEN` environment variable must be set.  In CI it comes
-from the `DO_TOKEN` secret; locally it can be exported or set in
-`~/.hermes/.env`.
+Set `VM_SANDBOX_PROVIDER=digitalocean` and `DIGITALOCEAN_TOKEN` in
+`~/.hermes/.env` (or export them in your shell).  In CI the token comes
+from the `DO_TOKEN` secret.
 
-## Verify the provider is registered
-
-```shell,script(name="available", expected_exit_code=0)
-hermes vm-sandbox available
-```
-
-```text,verify(script_name="available", stream=stdout)
-Registered providers: digitalocean, fake, hetzner
-```
-
-## Start with no VM
+## Check there is no VM yet
 
 ```shell,script(name="status-before", expected_exit_code=0)
 VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status
@@ -30,18 +19,15 @@ VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status
 
 ## Provision the VM
 
-Provisions a real DigitalOcean droplet.  The id and IP are
-non-deterministic, so we only check the exit code — the next step
-verifies the VM was recorded.
+This creates a real DigitalOcean droplet and waits for it to become active
+with a public IP.  The id and IP are not predictable, so we just check the
+exit code — the next step confirms the VM was recorded.
 
 ```shell,script(name="provision", expected_exit_code=0)
 VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox provision
 ```
 
-## Verify the VM is recorded
-
-After provisioning, `status` shows the VM.  We check the provider field,
-which is stable.
+## Check the VM status
 
 ```shell,script(name="status-after", expected_exit_code=0)
 VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status | grep '"provider"'
@@ -51,26 +37,25 @@ VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status | grep '"provider"'
   "provider": "digitalocean",
 ```
 
-The state file at `$HERMES_HOME/vm-sandbox/state.json` contains the VM:
+## Run commands on the VM
 
-```shell,script(name="state-file", expected_exit_code=0)
-test -f "$HERMES_HOME/vm-sandbox/state.json"
-grep '"digitalocean"' "$HERMES_HOME/vm-sandbox/state.json"
+Once the VM is provisioned, Hermes' ssh terminal backend routes every
+`terminal`, `file`, and `execute_code` call into it.  Restart Hermes (or
+start a new session) and the sandbox is active — your shell commands run
+on the VM, not on your host:
+
+```shell,skip()
+hermes -z "run: uname -a && docker --version"
 ```
 
-The SSH keypair was generated during provisioning:
-
-```shell,script(name="keypair", expected_exit_code=0)
-test -f "$HERMES_HOME/vm-sandbox/hermes-vm-sandbox"
-test -f "$HERMES_HOME/vm-sandbox/hermes-vm-sandbox.pub"
-echo "keypair exists"
-```
-
-```text,verify(script_name="keypair", stream=stdout)
-keypair exists
+```shell,skip()
+Linux hermes-sandbox 6.8.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Apr 20 02:24:16 UTC 2024 x86_64 GNU/Linux
+Docker version 26.0.0, build 2ae903e
 ```
 
 ## Tear down the VM
+
+When you are done, destroy the droplet so you stop paying for it:
 
 ```shell,script(name="teardown", expected_exit_code=0)
 VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox teardown
@@ -80,7 +65,7 @@ VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox teardown
 [vm-sandbox] VM torn down.
 ```
 
-## Verify the VM is gone
+## Confirm it is gone
 
 ```shell,script(name="status-after-teardown", expected_exit_code=0)
 VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status
