@@ -94,3 +94,21 @@ release-version version:
 push:
     git push
     git push origin --tags
+
+# ── PyPI publishing ──────────────────────────────────────────────────────────
+
+# Build sdist + wheel into dist/
+build:
+    uv build
+    uv run twine check dist/*
+
+# Publish to TestPyPI (https://test.pypi.org) — requires TWINE_PASSWORD or
+# API token in ~/.pypirc.  Uses --skip-existing so re-running after a partial
+# upload won't 400 on already-present files.
+publish-test:
+    uv run twine upload --repository testpypi --skip-existing dist/*
+
+# Publish to PyPI (https://pypi.org).  Run `just build` or `just release`
+# first so dist/ has fresh artifacts matching the tagged version.
+publish:
+    uv run twine upload --skip-existing dist/*
