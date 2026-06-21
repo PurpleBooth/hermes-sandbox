@@ -18,12 +18,14 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from typing import Any
 
 from .provider import (
     CloudProvider,
     RequestFn,
     VMInstance,
+    poll_until,
     register_provider,
 )
 
@@ -113,6 +115,9 @@ class HetznerProvider(CloudProvider):
 
     name = "hetzner"
     token_env_keys = ("HCLOUD_TOKEN", "VM_SANDBOX_TOKEN")
+    default_region = "nbg1"
+    default_image = "ubuntu-24.04"
+    default_instance_type = "cx23"
 
     def __init__(
         self,
@@ -120,14 +125,16 @@ class HetznerProvider(CloudProvider):
         poll_interval: float = 3.0,
         poll_timeout: int = 180,
         request_fn: RequestFn | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if not token:
             raise ValueError("HetznerProvider requires a non-empty token")
         self.token = token
         self.poll_interval = poll_interval
         self.poll_timeout = poll_timeout
-        # request_fn is injectable for tests; defaults to the real _request.
+        # request_fn / sleep are injectable for tests; defaults hit the network.
         self._request: RequestFn = request_fn or _request
+        self._sleep: Callable[[float], None] = sleep
 
     # -- helpers -----------------------------------------------------------
 
@@ -172,17 +179,27 @@ class HetznerProvider(CloudProvider):
             "public_net": {"enable_ipv4": True, "enable_ipv6": True},
         }
         resp = self._request("POST", "/servers", self.token, body=body)
-        server = resp.get("server", {})
-        vm = _to_vm(server)
+        vm = _to_vm(resp.get("server", {}))
+
         # Poll until a public IP is assigned.
-        deadline = time.monotonic() + self.poll_timeout
-        while not vm.public_ip and time.monotonic() < deadline:
-            time.sleep(self.poll_interval)
+        def _has_ip() -> bool:
+            nonlocal vm
+            if vm.public_ip:
+                return True
             vm = self.get(vm.id)
-        if not vm.public_ip:
+            return bool(vm.public_ip)
+
+        try:
+            poll_until(
+                _has_ip,
+                interval=self.poll_interval,
+                timeout=self.poll_timeout,
+                sleep=self._sleep,
+            )
+        except TimeoutError as exc:
             raise RuntimeError(
                 f"Hetzner VM {vm.id} never received a public IP within {self.poll_timeout}s"
-            )
+            ) from exc
         return vm
 
     def get(self, vm_id: str) -> VMInstance:

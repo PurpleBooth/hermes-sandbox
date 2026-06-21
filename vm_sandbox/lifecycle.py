@@ -23,12 +23,12 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from .provider import CloudProvider, VMInstance
-from .ssh_util import KeyPair, chmod_private_key, generate_keypair
+from .ssh_util import KeyPair, chmod_private_key, generate_keypair, restrict_to_owner
 
 logger = logging.getLogger(__name__)
 
@@ -62,22 +62,13 @@ class SandboxConfig:
 
         provider_name = _get("VM_SANDBOX_PROVIDER", "hetzner")
         token = _resolve_token(provider_name, env)
-
-        # DO defaults differ from Hetzner.
-        if provider_name == "digitalocean":
-            default_region = "fra1"
-            default_image = "ubuntu-24-04-x64"
-            default_size = "s-2vcpu-4gb"
-        else:
-            default_region = DEFAULT_REGION
-            default_image = DEFAULT_IMAGE
-            default_size = DEFAULT_INSTANCE_TYPE
+        defaults = _provider_defaults(provider_name)
 
         return cls(
             provider_name=provider_name,
-            instance_type=_get("VM_SANDBOX_INSTANCE_TYPE", default_size),
-            region=_get("VM_SANDBOX_REGION", default_region),
-            image=_get("VM_SANDBOX_IMAGE", default_image),
+            instance_type=_get("VM_SANDBOX_INSTANCE_TYPE", defaults["instance_type"]),
+            region=_get("VM_SANDBOX_REGION", defaults["region"]),
+            image=_get("VM_SANDBOX_IMAGE", defaults["image"]),
             ssh_user=_get("VM_SANDBOX_SSH_USER", DEFAULT_SSH_USER),
             token=token,
             vm_name=_get("VM_SANDBOX_NAME", "hermes-sandbox"),
@@ -87,6 +78,35 @@ class SandboxConfig:
     def is_configured(self) -> bool:
         # A token is only required for real providers; fakes don't need one.
         return bool(self.token) or self.provider_name == "fake"
+
+
+@dataclass
+class SandboxStatus:
+    """A snapshot of the sandbox VM: persisted state plus a live probe.
+
+    The persisted fields mirror the state file; the ``live_*`` fields are the
+    result of a best-effort provider ``get()``.  ``to_dict()`` preserves the
+    state-file key names (``vm_id``, ``provider``, ``public_ip``, …) so the
+    slash/CLI ``status`` command emits stable JSON the specs can grep.
+    """
+
+    vm_id: str
+    provider: str
+    name: str
+    region: str
+    public_ip: str
+    public_ipv6: str
+    ssh_host: str
+    ssh_user: str
+    created_at: float
+    last_used: float
+    live_status: str = ""
+    live_ip: str = ""
+    alive: bool = False
+    error: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
@@ -100,6 +120,29 @@ def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
         return get_provider_class(provider_name).resolve_token(env)
     except KeyError:
         return env.get("VM_SANDBOX_TOKEN") or ""
+
+
+def _provider_defaults(provider_name: str) -> dict[str, str]:
+    """Return the provider's default region/image/instance-type.
+
+    Defaults live on the provider class (Open/Closed) so adding a provider
+    needs no edit here.  Falls back to the base ``CloudProvider`` defaults if
+    the provider isn't registered yet.
+    """
+    from .provider import CloudProvider, get_provider_class
+    try:
+        cls = get_provider_class(provider_name)
+    except KeyError:
+        return {
+            "region": CloudProvider.default_region,
+            "image": CloudProvider.default_image,
+            "instance_type": CloudProvider.default_instance_type,
+        }
+    return {
+        "region": cls.default_region,
+        "image": cls.default_image,
+        "instance_type": cls.default_instance_type,
+    }
 
 
 class VMLifecycleManager:
@@ -132,6 +175,29 @@ class VMLifecycleManager:
         chmod_private_key(kp.private_path)
         return kp
 
+    # -- ssh backend wiring ------------------------------------------------
+
+    def ssh_env(self) -> dict[str, str] | None:
+        """Return the TERMINAL_SSH_* env vars pointing Hermes' ssh backend at the VM.
+
+        Returns None when there is no recorded state or no resolvable host, so
+        callers can no-op cleanly.  Encapsulates state-file access so the plugin
+        entrypoint does not reach into private members.
+        """
+        state = self._load_state()
+        if not state:
+            return None
+        host = str(state.get("ssh_host") or state.get("public_ip") or "")
+        if not host:
+            return None
+        key_path = str(self.state_dir / "hermes-vm-sandbox")
+        return {
+            "TERMINAL_ENV": "ssh",
+            "TERMINAL_SSH_HOST": host,
+            "TERMINAL_SSH_USER": str(state.get("ssh_user") or self.config.ssh_user),
+            "TERMINAL_SSH_KEY": key_path,
+        }
+
     # -- state file --------------------------------------------------------
 
     def _load_state(self) -> dict[str, Any] | None:
@@ -140,7 +206,9 @@ class VMLifecycleManager:
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else None
-        except Exception as exc:
+        except (ValueError, OSError) as exc:
+            # ValueError covers JSONDecodeError + UnicodeDecodeError; OSError
+            # covers permission/IO failures.  Other exceptions must propagate.
             logger.warning("vm-sandbox state file unreadable: %s", exc)
             return None
 
@@ -159,7 +227,7 @@ class VMLifecycleManager:
             "last_used": now,
         }
         self.state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        chmod_private_key(str(self.state_path))  # no-op ownership, but keep 0600
+        restrict_to_owner(str(self.state_path))  # connection details — owner-only
 
     def _clear_state(self) -> None:
         with contextlib.suppress(FileNotFoundError):
@@ -167,22 +235,35 @@ class VMLifecycleManager:
 
     # -- core operations ---------------------------------------------------
 
-    def status(self) -> dict[str, Any] | None:
+    def status(self) -> SandboxStatus | None:
         """Return the recorded state, refreshed against the provider if alive."""
         state = self._load_state()
         if not state:
             return None
-        # Best-effort liveness check; fall back to recorded state on error.
+        vm_id = str(state.get("vm_id", ""))
+        st = SandboxStatus(
+            vm_id=vm_id,
+            provider=str(state.get("provider", "")),
+            name=str(state.get("name", "")),
+            region=str(state.get("region", "")),
+            public_ip=str(state.get("public_ip", "")),
+            public_ipv6=str(state.get("public_ipv6", "")),
+            ssh_host=str(state.get("ssh_host", "")),
+            ssh_user=str(state.get("ssh_user", "")),
+            created_at=float(state.get("created_at", 0.0)),
+            last_used=float(state.get("last_used", 0.0)),
+        )
+        # Best-effort liveness check; fall back to "unknown/dead" on error.
         try:
-            vm = self.provider.get(state["vm_id"])
-            state["live_status"] = vm.status
-            state["live_ip"] = vm.public_ip
-            state["alive"] = vm.is_running()
+            vm = self.provider.get(vm_id)
+            st.live_status = vm.status
+            st.live_ip = vm.public_ip
+            st.alive = vm.is_running()
         except Exception as exc:
-            state["live_status"] = "unknown"
-            state["alive"] = False
-            state["error"] = str(exc)
-        return state
+            st.live_status = "unknown"
+            st.alive = False
+            st.error = str(exc)
+        return st
 
     def ensure_vm(self, max_key_attempts: int = 1) -> VMInstance:
         """Return a running sandbox VM, reusing or provisioning as needed.

@@ -18,12 +18,15 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from .provider import (
     CloudProvider,
     RequestFn,
     VMInstance,
+    poll_until,
     register_provider,
 )
 
@@ -102,6 +105,9 @@ class DigitalOceanProvider(CloudProvider):
 
     name = "digitalocean"
     token_env_keys = ("DIGITALOCEAN_TOKEN", "DO_API_TOKEN", "VM_SANDBOX_TOKEN")
+    default_region = "fra1"
+    default_image = "ubuntu-24-04-x64"
+    default_instance_type = "s-2vcpu-4gb"
 
     def __init__(
         self,
@@ -109,6 +115,7 @@ class DigitalOceanProvider(CloudProvider):
         poll_interval: float = 3.0,
         poll_timeout: int = 180,
         request_fn: RequestFn | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if not token:
             raise ValueError("DigitalOceanProvider requires a non-empty token")
@@ -116,6 +123,7 @@ class DigitalOceanProvider(CloudProvider):
         self.poll_interval = poll_interval
         self.poll_timeout = poll_timeout
         self._request: RequestFn = request_fn or _request
+        self._sleep: Callable[[float], None] = sleep
 
     # CloudProvider maps "running" to is_running(); DO uses "active".
     # Override the status normalisation by reusing VMInstance._RUNNING_STATUSES
@@ -126,7 +134,7 @@ class DigitalOceanProvider(CloudProvider):
         vm = _to_vm(droplet)
         # DO uses "active"; normalise so VMInstance.is_running() is True.
         if vm.status == "active":
-            vm.status = "running"
+            vm = replace(vm, status="running")
         return vm
 
     # -- CloudProvider interface ------------------------------------------
@@ -152,18 +160,28 @@ class DigitalOceanProvider(CloudProvider):
             "ipv6": True,
         }
         resp = self._request("POST", "/droplets", self.token, body=body)
-        droplet = resp.get("droplet", {})
-        vm = self._to_vm_running_aware(droplet)
+        vm = self._to_vm_running_aware(resp.get("droplet", {}))
+
         # Poll until active with a public IP.
-        deadline = time.monotonic() + self.poll_timeout
-        while (not vm.public_ip or not vm.is_running()) and time.monotonic() < deadline:
-            time.sleep(self.poll_interval)
+        def _ready() -> bool:
+            nonlocal vm
+            if vm.public_ip and vm.is_running():
+                return True
             vm = self.get(vm.id)
-        if not vm.public_ip:
+            return bool(vm.public_ip and vm.is_running())
+
+        try:
+            poll_until(
+                _ready,
+                interval=self.poll_interval,
+                timeout=self.poll_timeout,
+                sleep=self._sleep,
+            )
+        except TimeoutError as exc:
             raise RuntimeError(
                 f"DigitalOcean droplet {vm.id} never became active with an IP "
                 f"within {self.poll_timeout}s"
-            )
+            ) from exc
         return vm
 
     def get(self, vm_id: str) -> VMInstance:
@@ -179,8 +197,9 @@ class DigitalOceanProvider(CloudProvider):
             raise
 
     def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
-        # DO uses tags, not label selectors.  We match on our tag name.
-        resp = self._request("GET", f"/droplets?tag_name={_TAG}", self.token)
+        # DigitalOcean tags carry no value component — the tag name is the label
+        # key.  Query by the caller's label_key so a non-default tag is honoured.
+        resp = self._request("GET", f"/droplets?tag_name={label_key}", self.token)
         return [self._to_vm_running_aware(d) for d in resp.get("droplets", [])]
 
     # -- helpers -----------------------------------------------------------

@@ -105,5 +105,14 @@ def wait_for_ssh(
 
 def chmod_private_key(path: str) -> None:
     """Ensure a private key is 0600 — OpenSSH refuses group/other-readable keys."""
+    restrict_to_owner(path)
+
+
+def restrict_to_owner(path: str) -> None:
+    """Restrict a sensitive file (key, state) to the owner: 0600.
+
+    A thin, semantically-neutral wrapper over :func:`os.chmod` so callers that
+    chmod a non-key file (e.g. the sandbox state JSON) read clearly.
+    """
     if os.path.exists(path):
         os.chmod(path, 0o600)
