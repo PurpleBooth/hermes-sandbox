@@ -35,6 +35,16 @@ def test_config_from_env_hetzner(monkeypatch):
     assert cfg.is_configured()
 
 
+def test_config_from_env_hetzner_defaults(monkeypatch):
+    """Hetzner's own defaults apply when no VM_SANDBOX_* override is set."""
+    monkeypatch.setenv("VM_SANDBOX_PROVIDER", "hetzner")
+    monkeypatch.setenv("HCLOUD_TOKEN", "tok")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.region == "nbg1"
+    assert cfg.image == "ubuntu-24.04"
+    assert cfg.instance_type == "cx23"
+
+
 def test_config_from_env_digitalocean_defaults(monkeypatch):
     monkeypatch.setenv("VM_SANDBOX_PROVIDER", "digitalocean")
     monkeypatch.setenv("DIGITALOCEAN_TOKEN", "dotok")
@@ -77,11 +87,13 @@ def test_ensure_vm_reuses_existing(tmp_path, fake_key_factory):
 
 
 def test_ensure_vm_reprovisions_when_dead(tmp_path, fake_key_factory):
+    import dataclasses
+
     provider = FakeProvider()
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
     first = mgr.ensure_vm()
-    # Kill it on the provider side.
-    provider._vms[first.id].status = "off"
+    # Kill it on the provider side (VMInstance is frozen — replace, don't mutate).
+    provider._vms[first.id] = dataclasses.replace(provider._vms[first.id], status="off")
     second = mgr.ensure_vm()
     assert second.id != first.id
     provisions = [c for c in provider.calls if c["op"] == "provision"]
@@ -129,14 +141,15 @@ def test_maybe_auto_teardown_respects_config(tmp_path, fake_key_factory):
 
 
 def test_state_records_ipv6_and_ssh_host(tmp_path, fake_key_factory):
+    import dataclasses
+
     provider = FakeProvider()
     # Make provision return a VM with IPv6.
     orig_provision = provider.provision
 
     def provision_with_v6(*a, **k):
         vm = orig_provision(*a, **k)
-        vm.public_ipv6 = "2a01:db8::1"
-        return vm
+        return dataclasses.replace(vm, public_ipv6="2a01:db8::1")
 
     provider.provision = provision_with_v6
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
@@ -147,6 +160,82 @@ def test_state_records_ipv6_and_ssh_host(tmp_path, fake_key_factory):
     assert state["ssh_host"] == "2a01:db8::1"
 
 
+def test_save_state_restricts_file_permissions(tmp_path, fake_key_factory):
+    """The state file holds connection details — restrict it to the owner (0600)."""
+    import os
+    import stat
+
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    mgr.ensure_vm()
+    mode = stat.S_IMODE(os.stat(mgr.state_path).st_mode)
+    assert mode == 0o600
+
+
 def test_status_returns_none_without_state(tmp_path, fake_key_factory):
     mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
     assert mgr.status() is None
+
+
+def test_load_state_returns_none_on_corrupt_json(tmp_path, fake_key_factory):
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    mgr.state_path.write_text("{not valid json")
+    assert mgr._load_state() is None
+
+
+def test_load_state_returns_none_on_non_dict_json(tmp_path, fake_key_factory):
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    mgr.state_path.write_text("[1, 2, 3]")
+    assert mgr._load_state() is None
+
+
+def test_load_state_returns_none_on_unreadable_path(tmp_path, fake_key_factory):
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    # Point state_path at a directory — read_text() raises IsADirectoryError (OSError).
+    mgr.state_path = tmp_path
+    assert mgr._load_state() is None
+
+
+def test_ssh_env_returns_mapping_when_provisioned(tmp_path, fake_key_factory):
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    mgr.ensure_vm()
+    env = mgr.ssh_env()
+    assert env is not None
+    assert env["TERMINAL_ENV"] == "ssh"
+    assert env["TERMINAL_SSH_HOST"]
+    assert env["TERMINAL_SSH_USER"] == "root"
+    assert env["TERMINAL_SSH_KEY"].endswith("hermes-vm-sandbox")
+
+
+def test_ssh_env_returns_none_without_state(tmp_path, fake_key_factory):
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    assert mgr.ssh_env() is None
+
+
+def test_status_returns_sandboxstatus_value_object(tmp_path, fake_key_factory):
+    from vm_sandbox.lifecycle import SandboxStatus
+
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    mgr.ensure_vm()
+    st = mgr.status()
+    assert isinstance(st, SandboxStatus)
+    assert st.vm_id
+    assert st.provider == "fake"
+    assert st.public_ip
+    assert st.alive is True
+    assert st.live_status == "running"
+    # Round-trips to a dict carrying the keys the specdown status grep checks.
+    d = st.to_dict()
+    assert d["vm_id"] == st.vm_id
+    assert d["provider"] == "fake"
+    assert d["public_ip"] == st.public_ip
+
+
+def test_status_marks_dead_when_provider_forgets(tmp_path, fake_key_factory):
+    provider = FakeProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    mgr.ensure_vm()
+    del provider._vms[mgr.status().vm_id]  # type: ignore[union-attr]
+    st = mgr.status()
+    assert st is not None
+    assert st.alive is False
+    assert st.error  # recorded the provider error

@@ -12,6 +12,7 @@ label so the lifecycle manager can find a previously-created sandbox.
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -22,7 +23,7 @@ from typing import Any
 RequestFn = Callable[..., dict[str, Any]]
 
 
-@dataclass
+@dataclass(frozen=True)
 class VMInstance:
     """A provider-agnostic description of a running (or provisioning) VM."""
 
@@ -51,11 +52,15 @@ class VMInstance:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> VMInstance:
+        """Reconstruct a VMInstance from a ``to_dict()`` payload.
+
+        Unknown keys are ignored (defensive against extra fields in the dict),
+        not folded into ``extra`` — ``extra`` is restored only from the
+        ``extra`` key.
+        """
         known = set(cls.__dataclass_fields__)
         kwargs = {k: v for k, v in data.items() if k in known and k != "extra"}
         extra = data.get("extra") or {}
-        # Tolerate legacy state files where provider fields were flattened
-        # into extra — fold any unknown keys back into extra.
         return cls(extra=extra, **kwargs)
 
 
@@ -69,6 +74,13 @@ class CloudProvider(ABC):
     #: The first non-empty value wins.  ``VM_SANDBOX_TOKEN`` is a generic
     #: fallback so users can set one token for any provider.
     token_env_keys: tuple[str, ...] = ("VM_SANDBOX_TOKEN",)
+
+    #: Provider-specific defaults applied by ``SandboxConfig.from_env`` when the
+    #: corresponding ``VM_SANDBOX_*`` env var is unset.  Subclasses override
+    #: these so adding a provider needs no edit to ``SandboxConfig``.
+    default_region: str = "nbg1"
+    default_image: str = "ubuntu-24.04"
+    default_instance_type: str = "cx23"
 
     @classmethod
     def resolve_token(cls, env: dict[str, str]) -> str:
@@ -141,6 +153,35 @@ def get_provider_class(name: str) -> type[CloudProvider]:
 
 def available_providers() -> list[str]:
     return sorted(_REGISTRY)
+
+
+# --------------------------------------------------------------------------- #
+# Functional helpers
+# --------------------------------------------------------------------------- #
+
+
+def poll_until(
+    predicate: Callable[[], bool],
+    *,
+    interval: float,
+    timeout: float,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Call ``predicate`` until it returns True, sleeping ``interval`` between tries.
+
+    Raises ``TimeoutError`` if ``predicate`` is still falsy after ``timeout``
+    seconds.  ``sleep`` and ``clock`` are injectable so the poll loop can be
+    exercised in tests without real waiting.  The predicate is always called at
+    least once before sleeping.
+    """
+    deadline = clock() + timeout
+    while True:
+        if predicate():
+            return
+        if clock() >= deadline:
+            raise TimeoutError(f"poll_until: condition not met within {timeout}s")
+        sleep(interval)
 
 
 # ---------------------------------------------------------------------------

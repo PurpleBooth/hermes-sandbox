@@ -124,6 +124,19 @@ def test_slash_help():
     assert "/vm-sandbox" in out2
 
 
+def test_slash_help_does_not_advertise_dead_logs():
+    # `logs` read a file nothing writes — removed.  Help must not mention it.
+    assert "logs" not in vm_sandbox._handle_slash("help")
+
+
+def test_slash_logs_is_unknown(tmp_path, fake_key_factory, monkeypatch):
+    # `logs` was removed; with a configured manager it must be "Unknown subcommand".
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(vm_sandbox, "_manager", mgr)
+    out = vm_sandbox._handle_slash("logs")
+    assert "Unknown subcommand" in out
+
+
 def test_register_wires_hooks_and_commands(tmp_path, fake_key_factory):
     """register(ctx) should register the session hooks and commands."""
     registered = {"hooks": [], "commands": [], "cli": []}

@@ -140,3 +140,25 @@ def test_do_teardown_404_is_success():
 def test_do_requires_token():
     with pytest.raises(ValueError):
         DigitalOceanProvider(token="")
+
+
+def test_do_list_by_label_uses_label_key_as_tag():
+    """list_by_label must query the tag named by label_key, not a hardcoded tag.
+
+    DigitalOcean tags carry no value, so label_value is ignored — but the tag
+    name comes from the caller.  The contract test only passes today because it
+    happens to call with label_key == the hardcoded tag.
+    """
+    seen: list[str] = []
+
+    def fake_request(method, path, token, body=None, timeout=30):
+        seen.append(path)
+        if path == "/droplets?tag_name=custom-tag":
+            return {"droplets": [DO_DROPLET]}
+        return {"droplets": []}
+
+    p = DigitalOceanProvider(token="tok", request_fn=fake_request)
+    found = p.list_by_label("custom-tag", "ignored-value")
+    assert seen == ["/droplets?tag_name=custom-tag"]
+    assert len(found) == 1
+    assert found[0].id == "99"

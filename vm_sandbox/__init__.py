@@ -77,21 +77,14 @@ def _manager_or_build() -> VMLifecycleManager | None:
 
 def _apply_ssh_env(manager: VMLifecycleManager) -> None:
     """Point Hermes' ssh terminal backend at the sandbox VM."""
-    state = manager._load_state()  # noqa: SLF001 — same package
-    if not state:
+    env = manager.ssh_env()
+    if not env:
         return
-    host = state.get("ssh_host") or state.get("public_ip") or ""
-    if not host:
-        return
-    key_path = str(manager.state_dir / "hermes-vm-sandbox")
-    os.environ["TERMINAL_ENV"] = "ssh"
-    os.environ["TERMINAL_SSH_HOST"] = host
-    os.environ["TERMINAL_SSH_USER"] = state.get("ssh_user", manager.config.ssh_user)
-    os.environ["TERMINAL_SSH_KEY"] = key_path
+    os.environ.update(env)
     os.environ.setdefault("TERMINAL_SSH_PERSISTENT", "true")
     logger.info(
         "vm-sandbox: terminal backend -> ssh %s@%s",
-        os.environ["TERMINAL_SSH_USER"], host,
+        env["TERMINAL_SSH_USER"], env["TERMINAL_SSH_HOST"],
     )
 
 
@@ -170,7 +163,6 @@ Subcommands:
   status      Show the current sandbox VM (or "none")
   provision   Provision/reuse a VM now (also happens on session start)
   teardown    Destroy the recorded sandbox VM
-  logs        Tail the vm-sandbox log lines
   enable      Set terminal.backend=ssh in config.yaml (run once)
   help        This message
 
@@ -202,7 +194,7 @@ def _handle_slash(raw_args: str) -> str | None:
         st = manager.status()
         if not st:
             return "[vm-sandbox] No sandbox VM recorded."
-        return json.dumps(st, indent=2, default=str)
+        return json.dumps(st.to_dict(), indent=2, default=str)
 
     if sub == "provision":
         vm = manager.ensure_vm()
@@ -211,12 +203,6 @@ def _handle_slash(raw_args: str) -> str | None:
     if sub == "teardown":
         ok = manager.teardown()
         return "[vm-sandbox] VM torn down." if ok else "[vm-sandbox] No VM to tear down."
-
-    if sub == "logs":
-        path = manager.state_dir / "vm-sandbox.log"
-        if not path.exists():
-            return "[vm-sandbox] No log file yet."
-        return path.read_text(encoding="utf-8", errors="replace")[-4000:]
 
     return f"Unknown subcommand: {sub}\n\n{_HELP}"
 
@@ -270,7 +256,7 @@ def register(ctx: Any) -> None:
         "vm-sandbox",
         handler=_handle_slash,
         description="Cloud-VM terminal sandbox: provision/status/teardown.",
-        args_hint="<status|provision|teardown|enable|logs>",
+        args_hint="<status|provision|teardown|enable>",
     )
     ctx.register_cli_command(
         "vm-sandbox",
