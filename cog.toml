@@ -20,9 +20,13 @@ pre_bump_hooks = [
     "./scripts/bump-version.sh {{version}}",
 ]
 
-# No auto-push: there may be no remote configured yet, and the user prefers
-# explicit control.  Use `just push` after a release to push commits + tags.
-post_bump_hooks = []
+# After a release tag is cut: build sdist+wheel, validate with twine.
+# Publishing to PyPI is a separate explicit step (`just publish`) so a
+# botched release can be caught before it hits the index.
+post_bump_hooks = [
+    "uv build",
+    "twine check dist/*",
+]
 
 [changelog]
 path = "CHANGELOG.md"
