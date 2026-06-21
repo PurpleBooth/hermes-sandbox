@@ -101,6 +101,7 @@ class DigitalOceanProvider(CloudProvider):
     """DigitalOcean implementation."""
 
     name = "digitalocean"
+    token_env_keys = ("DIGITALOCEAN_TOKEN", "DO_API_TOKEN", "VM_SANDBOX_TOKEN")
 
     def __init__(
         self,

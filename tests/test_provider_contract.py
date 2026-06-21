@@ -137,6 +137,33 @@ def test_provider_has_all_interface_methods(name: str):
         assert callable(getattr(p, method)), f"{name} missing {method}"
 
 
+@pytest.mark.parametrize("name", _PROVIDERS)
+def test_provider_declares_token_env_keys(name: str):
+    """Every provider declares which env vars hold its API token."""
+    from vm_sandbox.provider import get_provider_class
+
+    cls = get_provider_class(name)
+    assert cls.token_env_keys, f"{name}: token_env_keys must not be empty"
+    assert "VM_SANDBOX_TOKEN" in cls.token_env_keys, (
+        f"{name}: token_env_keys must include VM_SANDBOX_TOKEN as a fallback"
+    )
+
+
+@pytest.mark.parametrize("name", _PROVIDERS)
+def test_provider_resolve_token_picks_first_non_empty(name: str):
+    """resolve_token returns the first non-empty env var from token_env_keys."""
+    from vm_sandbox.provider import get_provider_class
+
+    cls = get_provider_class(name)
+    primary = cls.token_env_keys[0]
+    # Only the primary key set → that value is returned.
+    assert cls.resolve_token({primary: "secret-123"}) == "secret-123"
+    # Nothing set → empty string.
+    assert cls.resolve_token({}) == ""
+    # VM_SANDBOX_TOKEN fallback works when the primary isn't set.
+    assert cls.resolve_token({"VM_SANDBOX_TOKEN": "fallback"}) == "fallback"
+
+
 # ── Contract: provision returns a valid running VM ──────────────────────────
 
 

@@ -65,6 +65,20 @@ class CloudProvider(ABC):
     #: Registry key / display name.  Subclasses set this.
     name: str = ""
 
+    #: Environment variables checked (in order) when resolving the API token.
+    #: The first non-empty value wins.  ``VM_SANDBOX_TOKEN`` is a generic
+    #: fallback so users can set one token for any provider.
+    token_env_keys: tuple[str, ...] = ("VM_SANDBOX_TOKEN",)
+
+    @classmethod
+    def resolve_token(cls, env: dict[str, str]) -> str:
+        """Return the first non-empty token from :attr:`token_env_keys`."""
+        for key in cls.token_env_keys:
+            val = env.get(key, "")
+            if val:
+                return val
+        return ""
+
     @abstractmethod
     def provision(
         self,
@@ -112,11 +126,17 @@ def register_provider(cls: type[CloudProvider]) -> type[CloudProvider]:
 
 def get_provider(name: str, **kwargs: Any) -> CloudProvider:
     """Instantiate a registered provider by name."""
+    return get_provider_class(name)(**kwargs)
+
+
+def get_provider_class(name: str) -> type[CloudProvider]:
+    """Return the registered provider class by name (without instantiating)."""
     try:
-        cls = _REGISTRY[name]
+        return _REGISTRY[name]
     except KeyError as exc:
-        raise KeyError(f"Unknown cloud provider {name!r}. Registered: {sorted(_REGISTRY)}") from exc
-    return cls(**kwargs)
+        raise KeyError(
+            f"Unknown cloud provider {name!r}. Registered: {sorted(_REGISTRY)}"
+        ) from exc
 
 
 def available_providers() -> list[str]:
