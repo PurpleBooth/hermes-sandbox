@@ -91,9 +91,27 @@ def _apply_ssh_env(manager: VMLifecycleManager) -> None:
     os.environ.setdefault("TERMINAL_SSH_PERSISTENT", "true")
     logger.info(
         "vm-sandbox: terminal backend -> ssh %s@%s",
-        os.environ["TERMINAL_SSH_USER"],
-        host,
+        os.environ["TERMINAL_SSH_USER"], host,
     )
+
+
+def _invalidate_cached_terminal_env() -> None:
+    """Clear Hermes' cached terminal environment so the next ``terminal`` call
+    creates a fresh SSH connection.
+
+    ``terminal_tool._active_environments`` caches the SSH environment by
+    ``task_id`` (default ``"default"``).  In a long-running process (gateway,
+    dashboard) that handles multiple sessions, a stale SSH connection from a
+    previous session would be reused even after the plugin updates
+    ``TERMINAL_SSH_*`` env vars.  Clearing the cache forces the next terminal
+    call to re-read the env vars and dial the new VM.
+    """
+    try:
+        from tools.terminal_tool import cleanup_vm
+        cleanup_vm("default")
+        logger.debug("vm-sandbox: cleared cached terminal environment for 'default'")
+    except Exception as exc:
+        logger.debug("vm-sandbox: could not clear cached terminal env: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +138,7 @@ def _on_session_start(
     try:
         manager.ensure_vm()
         _apply_ssh_env(manager)
+        _invalidate_cached_terminal_env()
     except Exception as exc:
         logger.warning("vm-sandbox: session-start provisioning failed: %s", exc)
 
