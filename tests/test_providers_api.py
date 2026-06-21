@@ -59,11 +59,33 @@ def test_hetzner_provision_polls_for_ip():
 
 
 def test_hetzner_teardown_404_is_success():
+    from vm_sandbox.provider import ApiError
+
     def fake_request(method, path, token, body=None, timeout=30):
-        raise RuntimeError("Hetzner API DELETE /servers/1 failed: HTTP 404 not found")
+        raise ApiError("GET", path, status_code=404, detail="not found")
 
     p = HetznerProvider(token="tok", request_fn=fake_request)
     p.teardown("1")  # should not raise
+
+
+def test_hetzner_teardown_500_raises_api_error():
+    from vm_sandbox.provider import ApiError
+
+    def fake_request(method, path, token, body=None, timeout=30):
+        raise ApiError("DELETE", path, status_code=500, detail="boom")
+
+    p = HetznerProvider(token="tok", request_fn=fake_request)
+    with pytest.raises(ApiError) as exc_info:
+        p.teardown("1")
+    assert exc_info.value.status_code == 500
+
+
+def test_api_error_is_a_runtime_error_subclass():
+    """ApiError subclasses RuntimeError so existing 'except RuntimeError' callers
+    that don't check status_code still catch it (backwards-compatible)."""
+    from vm_sandbox.provider import ApiError
+
+    assert issubclass(ApiError, RuntimeError)
 
 
 def test_hetzner_teardown_other_error_raises():
@@ -130,8 +152,10 @@ def test_do_provision_polls_until_active():
 
 
 def test_do_teardown_404_is_success():
+    from vm_sandbox.provider import ApiError
+
     def fake_request(method, path, token, body=None, timeout=30):
-        raise RuntimeError("HTTP 404 not_found")
+        raise ApiError("DELETE", path, status_code=404, detail="not found")
 
     p = DigitalOceanProvider(token="tok", request_fn=fake_request)
     p.teardown("1")
