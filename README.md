@@ -34,8 +34,8 @@ decorator.
 ## Install
 
 ```bash
-# 1. Symlink the plugin into your Hermes plugins dir.
-ln -s /var/home/billie/Code/vm-sandbox-hermes/vm_sandbox ~/.hermes/plugins/vm-sandbox
+# 1. Clone the plugin into your Hermes plugins dir.
+git clone https://codeberg.org/PurpleBooth/vm-sandbox-hermes ~/.hermes/plugins/vm-sandbox
 
 # 2. Enable it.
 hermes plugins enable vm-sandbox
