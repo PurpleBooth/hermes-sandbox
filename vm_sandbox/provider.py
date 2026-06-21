@@ -12,7 +12,11 @@ label so the lifecycle manager can find a previously-created sandbox.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import time
+import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -203,6 +207,97 @@ def poll_until(
         if clock() >= deadline:
             raise TimeoutError(f"poll_until: condition not met within {timeout}s")
         sleep(interval)
+
+
+# --------------------------------------------------------------------------- #
+# REST plumbing shared by cloud providers
+# --------------------------------------------------------------------------- #
+
+
+def http_json_request(
+    api_base: str,
+    method: str,
+    path: str,
+    token: str,
+    body: dict[str, Any] | None = None,
+    timeout: int = 30,
+) -> dict[str, Any]:
+    """Perform an authenticated bearer-token JSON request over stdlib urllib.
+
+    Shared by every REST provider — the only thing that varies is ``api_base``.
+    Raises :class:`ApiError` (a ``RuntimeError``) on a non-2xx response.
+    """
+    url = f"{api_base}/{path.lstrip('/')}"
+    data = None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = exc.read().decode("utf-8", errors="replace")
+        raise ApiError(method, path, status_code=exc.code, detail=detail) from exc
+
+
+class RestCloudProvider(CloudProvider):
+    """Base for providers built on a bearer-token REST API over urllib.
+
+    Holds the token/poll/sleep wiring and idempotent teardown once, so concrete
+    providers only declare their API shape (endpoints, JSON → VMInstance mapping,
+    status normalisation).
+    """
+
+    #: Base URL of the cloud REST API, e.g. ``https://api.hetzner.cloud/v1``.
+    api_base: str = ""
+
+    def __init__(
+        self,
+        token: str,
+        poll_interval: float = 3.0,
+        poll_timeout: int = 180,
+        request_fn: RequestFn | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if not token:
+            raise ValueError(f"{type(self).__name__} requires a non-empty token")
+        self.token = token
+        self.poll_interval = poll_interval
+        self.poll_timeout = poll_timeout
+        # request_fn is injectable for tests; default hits the real API.
+        self._request: RequestFn = request_fn or self._default_request
+        self._sleep: Callable[[float], None] = sleep
+
+    def _default_request(
+        self,
+        method: str,
+        path: str,
+        token: str,
+        body: dict[str, Any] | None = None,
+        timeout: int = 30,
+    ) -> dict[str, Any]:
+        return http_json_request(self.api_base, method, path, token, body, timeout)
+
+    @abstractmethod
+    def _delete_path(self, vm_id: str) -> str:
+        """REST path for destroying a VM. Subclasses must implement."""
+
+    def teardown(self, vm_id: str) -> None:
+        """Idempotent teardown: a 404 (already gone) is a success."""
+        try:
+            self._request("DELETE", self._delete_path(vm_id), self.token)
+        except ApiError as exc:
+            if exc.status_code == 404:
+                return
+            raise
 
 
 # ---------------------------------------------------------------------------
