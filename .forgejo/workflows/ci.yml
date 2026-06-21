@@ -72,8 +72,14 @@ jobs:
           chmod +x ~/.local/bin/specdown
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # Cloud tokens are forwarded to the test harness so the Hetzner and
+      # DigitalOcean task specs can provision real VMs.  When a token secret
+      # is absent (e.g. on a fork PR), the harness skips that provider's spec.
       - name: Run end-to-end specs
-        run: specdown run --temporary-workspace-dir specs/*.md
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HETZNER_API_TOKEN }}
+          DIGITALOCEAN_TOKEN: ${{ secrets.DO_TOKEN }}
+        run: ./test-harness/specdown
 
   bump:
     name: Bump version

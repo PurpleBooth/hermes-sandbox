@@ -150,7 +150,7 @@ class DigitalOceanProvider(CloudProvider):
             "backups": False,
             "ipv6": True,
         }
-        resp = self._request("POST", "/v2/droplets", self.token, body=body)
+        resp = self._request("POST", "/droplets", self.token, body=body)
         droplet = resp.get("droplet", {})
         vm = self._to_vm_running_aware(droplet)
         # Poll until active with a public IP.
@@ -166,12 +166,12 @@ class DigitalOceanProvider(CloudProvider):
         return vm
 
     def get(self, vm_id: str) -> VMInstance:
-        resp = self._request("GET", f"/v2/droplets/{vm_id}", self.token)
+        resp = self._request("GET", f"/droplets/{vm_id}", self.token)
         return self._to_vm_running_aware(resp.get("droplet", {}))
 
     def teardown(self, vm_id: str) -> None:
         try:
-            self._request("DELETE", f"/v2/droplets/{vm_id}", self.token)
+            self._request("DELETE", f"/droplets/{vm_id}", self.token)
         except RuntimeError as exc:
             if "HTTP 404" in str(exc) or "not_found" in str(exc).lower():
                 return
@@ -179,7 +179,7 @@ class DigitalOceanProvider(CloudProvider):
 
     def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
         # DO uses tags, not label selectors.  We match on our tag name.
-        resp = self._request("GET", f"/v2/droplets?tag_name={_TAG}", self.token)
+        resp = self._request("GET", f"/droplets?tag_name={_TAG}", self.token)
         return [self._to_vm_running_aware(d) for d in resp.get("droplets", [])]
 
     # -- helpers -----------------------------------------------------------
@@ -187,14 +187,16 @@ class DigitalOceanProvider(CloudProvider):
     def _ensure_ssh_key(self, public_key: str, name: str = "hermes-vm-sandbox") -> str:
         """Upload the public key (idempotent) and return its DO key id (str)."""
         try:
-            listing = self._request("GET", "/v2/account/keys", self.token)
+            listing = self._request("GET", "/account/keys", self.token)
         except RuntimeError:
             listing = {"ssh_keys": []}
         for key in listing.get("ssh_keys", []):
             if key.get("name") == name or key.get("public_key", "").strip() == public_key:
                 return str(key["id"])
         resp = self._request(
-            "POST", "/v2/account/keys", self.token,
+            "POST",
+            "/account/keys",
+            self.token,
             body={"name": name, "public_key": public_key},
         )
         return str(resp.get("ssh_key", {}).get("id", ""))

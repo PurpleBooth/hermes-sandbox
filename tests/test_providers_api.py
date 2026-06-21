@@ -108,23 +108,22 @@ def test_do_provision_polls_until_active():
     calls = {"n": 0}
 
     def fake_request(method, path, token, body=None, timeout=30):
-        if method == "GET" and path == "/v2/account/keys":
+        if method == "GET" and path == "/account/keys":
             return {"ssh_keys": []}
-        if method == "POST" and path == "/v2/account/keys":
+        if method == "POST" and path == "/account/keys":
             return {"ssh_key": {"id": 7}}
-        if method == "POST" and path == "/v2/droplets":
-            return {"droplet": {**DO_DROPLET, "status": "new",
-                                "networks": {"v4": [], "v6": []}}}
-        if method == "GET" and path.startswith("/v2/droplets/"):
+        if method == "POST" and path == "/droplets":
+            return {"droplet": {**DO_DROPLET, "status": "new", "networks": {"v4": [], "v6": []}}}
+        if method == "GET" and path.startswith("/droplets/"):
             calls["n"] += 1
             if calls["n"] < 2:
-                return {"droplet": {**DO_DROPLET, "status": "new",
-                                    "networks": {"v4": [], "v6": []}}}
+                return {
+                    "droplet": {**DO_DROPLET, "status": "new", "networks": {"v4": [], "v6": []}}
+                }
             return {"droplet": DO_DROPLET}
         raise AssertionError(f"unexpected {method} {path}")
 
-    p = DigitalOceanProvider(token="tok", poll_interval=0, poll_timeout=5,
-                             request_fn=fake_request)
+    p = DigitalOceanProvider(token="tok", poll_interval=0, poll_timeout=5, request_fn=fake_request)
     vm = p.provision("n", "s-2vcpu-4gb", "fra1", "ubuntu-24-04-x64", "ssh-ed25519 K")
     assert vm.public_ip == "5.6.7.8"
     assert vm.is_running()
