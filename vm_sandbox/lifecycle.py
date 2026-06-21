@@ -23,9 +23,9 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .provider import CloudProvider, VMInstance
 from .ssh_util import KeyPair, chmod_private_key, generate_keypair, restrict_to_owner
@@ -123,6 +123,133 @@ class _LiveProbe:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class SandboxState:
+    """The persisted sandbox record (what lives in ``state.json``).
+
+    A domain value object: the use-case layer (``VMLifecycleManager``) operates
+    on this typed value rather than a raw ``dict`` or filesystem paths.
+    """
+
+    vm_id: str
+    provider: str
+    name: str
+    region: str
+    public_ip: str
+    public_ipv6: str
+    ssh_host: str
+    ssh_user: str
+    created_at: float
+    last_used: float
+
+    @classmethod
+    def for_vm(cls, vm: VMInstance, ssh_user: str, now: float) -> SandboxState:
+        return cls(
+            vm_id=vm.id,
+            provider=vm.provider,
+            name=vm.name,
+            region=vm.region,
+            public_ip=vm.public_ip,
+            public_ipv6=vm.public_ipv6,
+            ssh_host=vm.preferred_ip(),
+            ssh_user=ssh_user,
+            created_at=now,
+            last_used=now,
+        )
+
+    def touched(self, now: float) -> SandboxState:
+        """Immutable update: return a copy with ``last_used`` advanced."""
+        return replace(self, last_used=now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class StateRepository(Protocol):
+    """Persistence seam for :class:`SandboxState` (dependency inversion).
+
+    The application layer (``VMLifecycleManager``) depends on this Protocol,
+    not on any concrete filesystem implementation — so persistence can be
+    swapped (e.g. an in-memory repo in tests) without touching the use-case.
+    """
+
+    @property
+    def path(self) -> Path:
+        """Filesystem path backing the state (for diagnostics / back-comat)."""
+        ...
+
+    @property
+    def key_dir(self) -> Path:
+        """Directory holding the state file and SSH keypair."""
+        ...
+
+    def load(self) -> SandboxState | None:
+        """Load the recorded state, or None if absent / unreadable."""
+        ...
+
+    def save(self, state: SandboxState) -> None:
+        """Persist (overwrite) the recorded state."""
+        ...
+
+    def clear(self) -> None:
+        """Delete the recorded state (idempotent)."""
+        ...
+
+
+class JsonStateRepository:
+    """Filesystem-backed :class:`StateRepository`.
+
+    Stores the sandbox state as JSON at ``<state_dir>/state.json`` and
+    restricts it to the owner.  The SSH keypair lives alongside it in
+    ``<state_dir>``.
+    """
+
+    def __init__(self, state_dir: Path) -> None:
+        self._dir = Path(state_dir)
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._path = self._dir / STATE_FILENAME
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    @property
+    def key_dir(self) -> Path:
+        return self._dir
+
+    def load(self) -> SandboxState | None:
+        if not self._path.exists():
+            return None
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return None
+            return self._state_from_dict(data)
+        except (ValueError, OSError) as exc:
+            # ValueError covers JSONDecodeError + UnicodeDecodeError; OSError
+            # covers permission/IO failures.  Other exceptions propagate.
+            logger.warning("vm-sandbox state file unreadable: %s", exc)
+            return None
+
+    @staticmethod
+    def _state_from_dict(data: dict[str, Any]) -> SandboxState | None:
+        known = set(SandboxState.__dataclass_fields__)
+        kwargs = {k: v for k, v in data.items() if k in known}
+        try:
+            return SandboxState(**kwargs)
+        except TypeError:
+            # Missing required field — treat as no usable state.
+            return None
+
+    def save(self, state: SandboxState) -> None:
+        self._path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        restrict_to_owner(str(self._path))  # connection details — owner-only
+
+    def clear(self) -> None:
+        with contextlib.suppress(FileNotFoundError):
+            self._path.unlink()
+
+
 def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
     """Resolve the API token by delegating to the provider class.
 
@@ -160,7 +287,13 @@ def _provider_defaults(provider_name: str) -> dict[str, str]:
 
 
 class VMLifecycleManager:
-    """Provision, reuse, and tear down the sandbox VM."""
+    """Provision, reuse, and tear down the sandbox VM.
+
+    The use-case (application) layer: orchestrates a :class:`CloudProvider`
+    and a :class:`StateRepository` (persistence seam) plus an injectable
+    clock/key-factory.  It performs no filesystem I/O directly — that lives in
+    the repository — so it stays unit-testable with an in-memory repo.
+    """
 
     def __init__(
         self,
@@ -170,6 +303,7 @@ class VMLifecycleManager:
         key_factory: Callable[[Path, str], KeyPair] = generate_keypair,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
+        state_repo: StateRepository | None = None,
     ) -> None:
         self.provider = provider
         self.config = config
@@ -177,15 +311,24 @@ class VMLifecycleManager:
         self._key_factory = key_factory
         self._clock = clock
         self._sleep = sleep
+        self._repo: StateRepository = state_repo or JsonStateRepository(
+            self.hermes_home / "vm-sandbox"
+        )
 
-        self.state_dir = self.hermes_home / "vm-sandbox"
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.state_path = self.state_dir / STATE_FILENAME
+    # -- back-comat accessors (tests / diagnostics) ------------------------
+
+    @property
+    def state_dir(self) -> Path:
+        return self._repo.key_dir
+
+    @property
+    def state_path(self) -> Path:
+        return self._repo.path
 
     # -- keypair -----------------------------------------------------------
 
     def keypair(self) -> KeyPair:
-        kp = self._key_factory(self.state_dir, "hermes-vm-sandbox")
+        kp = self._key_factory(self._repo.key_dir, "hermes-vm-sandbox")
         chmod_private_key(kp.private_path)
         return kp
 
@@ -195,79 +338,42 @@ class VMLifecycleManager:
         """Return the TERMINAL_SSH_* env vars pointing Hermes' ssh backend at the VM.
 
         Returns None when there is no recorded state or no resolvable host, so
-        callers can no-op cleanly.  Encapsulates state-file access so the plugin
+        callers can no-op cleanly.  Encapsulates state access so the plugin
         entrypoint does not reach into private members.
         """
-        state = self._load_state()
+        state = self._repo.load()
         if not state:
             return None
-        host = str(state.get("ssh_host") or state.get("public_ip") or "")
+        host = state.ssh_host or state.public_ip
         if not host:
             return None
-        key_path = str(self.state_dir / "hermes-vm-sandbox")
+        key_path = str(self._repo.key_dir / "hermes-vm-sandbox")
         return {
             "TERMINAL_ENV": "ssh",
             "TERMINAL_SSH_HOST": host,
-            "TERMINAL_SSH_USER": str(state.get("ssh_user") or self.config.ssh_user),
+            "TERMINAL_SSH_USER": state.ssh_user or self.config.ssh_user,
             "TERMINAL_SSH_KEY": key_path,
         }
-
-    # -- state file --------------------------------------------------------
-
-    def _load_state(self) -> dict[str, Any] | None:
-        if not self.state_path.exists():
-            return None
-        try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else None
-        except (ValueError, OSError) as exc:
-            # ValueError covers JSONDecodeError + UnicodeDecodeError; OSError
-            # covers permission/IO failures.  Other exceptions must propagate.
-            logger.warning("vm-sandbox state file unreadable: %s", exc)
-            return None
-
-    def _save_state(self, vm: VMInstance) -> None:
-        now = self._clock()
-        data = {
-            "vm_id": vm.id,
-            "provider": vm.provider,
-            "name": vm.name,
-            "region": vm.region,
-            "public_ip": vm.public_ip,
-            "public_ipv6": vm.public_ipv6,
-            "ssh_host": vm.preferred_ip(),
-            "ssh_user": self.config.ssh_user,
-            "created_at": now,
-            "last_used": now,
-        }
-        self.state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        restrict_to_owner(str(self.state_path))  # connection details — owner-only
-
-    def _clear_state(self) -> None:
-        with contextlib.suppress(FileNotFoundError):
-            self.state_path.unlink()
 
     # -- core operations ---------------------------------------------------
 
     def status(self) -> SandboxStatus | None:
         """Return the recorded state, refreshed against the provider if alive."""
-        state = self._load_state()
+        state = self._repo.load()
         if not state:
             return None
-        vm_id = str(state.get("vm_id", ""))
-        # Probe liveness first, then build the value once — no mutation.
-        probe = self._probe_vm(vm_id)
+        probe = self._probe_vm(state.vm_id)
         return SandboxStatus(
-            vm_id=vm_id,
-            provider=str(state.get("provider", "")),
-            name=str(state.get("name", "")),
-            region=str(state.get("region", "")),
-            public_ip=str(state.get("public_ip", "")),
-            public_ipv6=str(state.get("public_ipv6", "")),
-            ssh_host=str(state.get("ssh_host", "")),
-            ssh_user=str(state.get("ssh_user", "")),
-            created_at=float(state.get("created_at", 0.0)),
-            last_used=float(state.get("last_used", 0.0)),
+            vm_id=state.vm_id,
+            provider=state.provider,
+            name=state.name,
+            region=state.region,
+            public_ip=state.public_ip,
+            public_ipv6=state.public_ipv6,
+            ssh_host=state.ssh_host,
+            ssh_user=state.ssh_user,
+            created_at=state.created_at,
+            last_used=state.last_used,
             live_status=probe.status,
             live_ip=probe.ip,
             alive=probe.alive,
@@ -289,22 +395,20 @@ class VMLifecycleManager:
     def ensure_vm(self, max_key_attempts: int = 1) -> VMInstance:
         """Return a running sandbox VM, reusing or provisioning as needed.
 
-        1. If state file exists and the recorded VM is still running, reuse it.
+        1. If state exists and the recorded VM is still running, reuse it.
         2. Otherwise provision a new VM (uploading the SSH key) and record it.
         """
-        state = self._load_state()
-        if state and state.get("vm_id"):
+        state = self._repo.load()
+        if state and state.vm_id:
             try:
-                vm = self.provider.get(state["vm_id"])
+                vm = self.provider.get(state.vm_id)
                 if vm.is_running() and vm.preferred_ip():
                     logger.info(
                         "vm-sandbox: reusing existing VM %s (%s)",
                         vm.id,
                         vm.preferred_ip(),
                     )
-                    # Touch last_used.
-                    state["last_used"] = self._clock()
-                    self.state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                    self._repo.save(state.touched(self._clock()))
                     return vm
                 logger.info(
                     "vm-sandbox: recorded VM %s not running (status=%s) — reprovisioning",
@@ -313,7 +417,7 @@ class VMLifecycleManager:
                 )
             except Exception as exc:
                 logger.info("vm-sandbox: recorded VM unreachable (%s) — reprovisioning", exc)
-            self._clear_state()
+            self._repo.clear()
 
         # Provision fresh.
         kp = self.keypair()
@@ -326,23 +430,22 @@ class VMLifecycleManager:
             ssh_public_key=kp.public_key,
             labels=labels,
         )
-        self._save_state(vm)
+        self._repo.save(SandboxState.for_vm(vm, self.config.ssh_user, self._clock()))
         logger.info("vm-sandbox: provisioned VM %s (%s)", vm.id, vm.preferred_ip())
         return vm
 
     def teardown(self) -> bool:
         """Destroy the recorded VM and clear state. Returns True if a VM was torn down."""
-        state = self._load_state()
-        if not state or not state.get("vm_id"):
+        state = self._repo.load()
+        if not state or not state.vm_id:
             return False
-        vm_id = state["vm_id"]
         try:
-            self.provider.teardown(vm_id)
-            logger.info("vm-sandbox: tore down VM %s", vm_id)
+            self.provider.teardown(state.vm_id)
+            logger.info("vm-sandbox: tore down VM %s", state.vm_id)
         except Exception as exc:
-            logger.warning("vm-sandbox: teardown of %s failed: %s", vm_id, exc)
+            logger.warning("vm-sandbox: teardown of %s failed: %s", state.vm_id, exc)
             # Still clear local state so we don't keep pointing at a dead VM.
-        self._clear_state()
+        self._repo.clear()
         return True
 
     def maybe_auto_teardown(self) -> bool:

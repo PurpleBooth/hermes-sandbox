@@ -176,23 +176,81 @@ def test_status_returns_none_without_state(tmp_path, fake_key_factory):
     assert mgr.status() is None
 
 
-def test_load_state_returns_none_on_corrupt_json(tmp_path, fake_key_factory):
-    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
-    mgr.state_path.write_text("{not valid json")
-    assert mgr._load_state() is None
+def test_load_state_returns_none_on_corrupt_json(tmp_path):
+    from vm_sandbox.lifecycle import JsonStateRepository
+
+    repo = JsonStateRepository(tmp_path)
+    repo.path.write_text("{not valid json")
+    assert repo.load() is None
 
 
-def test_load_state_returns_none_on_non_dict_json(tmp_path, fake_key_factory):
-    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
-    mgr.state_path.write_text("[1, 2, 3]")
-    assert mgr._load_state() is None
+def test_load_state_returns_none_on_non_dict_json(tmp_path):
+    from vm_sandbox.lifecycle import JsonStateRepository
+
+    repo = JsonStateRepository(tmp_path)
+    repo.path.write_text("[1, 2, 3]")
+    assert repo.load() is None
 
 
-def test_load_state_returns_none_on_unreadable_path(tmp_path, fake_key_factory):
-    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
-    # Point state_path at a directory — read_text() raises IsADirectoryError (OSError).
-    mgr.state_path = tmp_path
-    assert mgr._load_state() is None
+def test_load_state_returns_none_on_unreadable_path(tmp_path):
+    from vm_sandbox.lifecycle import JsonStateRepository
+
+    repo = JsonStateRepository(tmp_path)
+    # Point the backing path at a directory — read_text() raises IsADirectoryError (OSError).
+    repo._path = tmp_path  # type: ignore[attr-defined]
+    assert repo.load() is None
+
+
+def test_state_repository_roundtrip(tmp_path):
+    """save() then load() returns an equal SandboxState (typed persistence)."""
+    from vm_sandbox.lifecycle import JsonStateRepository, SandboxState
+
+    repo = JsonStateRepository(tmp_path)
+    assert repo.load() is None  # nothing yet
+
+    state = SandboxState(
+        vm_id="1", provider="fake", name="n", region="r", public_ip="1.2.3.4",
+        public_ipv6="", ssh_host="1.2.3.4", ssh_user="root",
+        created_at=1.0, last_used=2.0,
+    )
+    repo.save(state)
+    loaded = repo.load()
+    assert loaded == state
+    repo.clear()
+    assert repo.load() is None
+
+
+def test_manager_accepts_injected_state_repo(tmp_path, fake_key_factory):
+    """The manager depends on the StateRepository Protocol, not the filesystem:
+    an in-memory repo lets the use-case run without any file I/O."""
+    from vm_sandbox.lifecycle import SandboxState
+
+    class InMemoryRepo:
+        def __init__(self) -> None:
+            self._state: SandboxState | None = None
+            self.path = tmp_path / "mem"
+            self.key_dir = tmp_path
+
+        def load(self) -> SandboxState | None:
+            return self._state
+
+        def save(self, state: SandboxState) -> None:
+            self._state = state
+
+        def clear(self) -> None:
+            self._state = None
+
+    provider = FakeProvider()
+    config = SandboxConfig(provider_name="fake", token="", ssh_user="root")
+    mgr = VMLifecycleManager(
+        provider=provider, config=config, hermes_home=tmp_path / ".hermes",
+        key_factory=fake_key_factory, state_repo=InMemoryRepo(),
+    )
+    vm = mgr.ensure_vm()
+    assert vm.is_running()
+    # No state.json file was created — the in-memory repo holds it.
+    assert not (tmp_path / ".hermes" / "vm-sandbox").exists()
+    assert mgr.ssh_env() is not None  # repo-backed state is readable
 
 
 def test_ssh_env_returns_mapping_when_provisioned(tmp_path, fake_key_factory):
