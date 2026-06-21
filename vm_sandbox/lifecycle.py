@@ -392,7 +392,7 @@ class VMLifecycleManager:
             return _LiveProbe(status="unknown", ip="", alive=False, error=str(exc))
         return _LiveProbe(status=vm.status, ip=vm.public_ip, alive=vm.is_running())
 
-    def ensure_vm(self, max_key_attempts: int = 1) -> VMInstance:
+    def ensure_vm(self) -> VMInstance:
         """Return a running sandbox VM, reusing or provisioning as needed.
 
         1. If state exists and the recorded VM is still running, reuse it.
