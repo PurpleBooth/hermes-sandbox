@@ -12,19 +12,12 @@ can discover sandboxes created by a previous Hermes process.
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
-import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable
 from typing import Any
 
 from .provider import (
     ApiError,
-    CloudProvider,
-    RequestFn,
+    RestCloudProvider,
     VMInstance,
     poll_until,
     register_provider,
@@ -35,35 +28,6 @@ logger = logging.getLogger(__name__)
 API_BASE = "https://api.hetzner.cloud/v1"
 _DEFAULT_LABEL_KEY = "hermes-vm-sandbox"
 _DEFAULT_LABEL_VALUE = "true"
-
-
-def _request(
-    method: str,
-    path: str,
-    token: str,
-    body: dict[str, Any] | None = None,
-    timeout: int = 30,
-) -> dict[str, Any]:
-    """Perform an authenticated Hetzner API request, returning parsed JSON."""
-    url = f"{API_BASE}/{path.lstrip('/')}"
-    data = None
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-    }
-    if body is not None:
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as exc:
-        detail = ""
-        with contextlib.suppress(Exception):
-            detail = exc.read().decode("utf-8", errors="replace")
-        raise ApiError(method, path, status_code=exc.code, detail=detail) from exc
 
 
 def _extract_ip(pub_net: dict[str, Any], key: str) -> str:
@@ -109,31 +73,18 @@ def _to_vm(server: dict[str, Any]) -> VMInstance:
 
 
 @register_provider
-class HetznerProvider(CloudProvider):
+class HetznerProvider(RestCloudProvider):
     """Hetzner Cloud implementation."""
 
     name = "hetzner"
+    api_base = API_BASE
     token_env_keys = ("HCLOUD_TOKEN", "VM_SANDBOX_TOKEN")
     default_region = "nbg1"
     default_image = "ubuntu-24.04"
     default_instance_type = "cx23"
 
-    def __init__(
-        self,
-        token: str,
-        poll_interval: float = 3.0,
-        poll_timeout: int = 180,
-        request_fn: RequestFn | None = None,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        if not token:
-            raise ValueError("HetznerProvider requires a non-empty token")
-        self.token = token
-        self.poll_interval = poll_interval
-        self.poll_timeout = poll_timeout
-        # request_fn / sleep are injectable for tests; defaults hit the network.
-        self._request: RequestFn = request_fn or _request
-        self._sleep: Callable[[float], None] = sleep
+    def _delete_path(self, vm_id: str) -> str:
+        return f"/servers/{vm_id}"
 
     # -- helpers -----------------------------------------------------------
 
@@ -142,7 +93,7 @@ class HetznerProvider(CloudProvider):
         # Try to find an existing key with this name or fingerprint.
         try:
             listing = self._request("GET", "/ssh_keys", self.token)
-        except RuntimeError:
+        except ApiError:
             listing = {"ssh_keys": []}
         for key in listing.get("ssh_keys", []):
             if key.get("name") == name or key.get("public_key", "").strip() == public_key:
@@ -204,15 +155,6 @@ class HetznerProvider(CloudProvider):
     def get(self, vm_id: str) -> VMInstance:
         resp = self._request("GET", f"/servers/{vm_id}", self.token)
         return _to_vm(resp.get("server", {}))
-
-    def teardown(self, vm_id: str) -> None:
-        try:
-            self._request("DELETE", f"/servers/{vm_id}", self.token)
-        except ApiError as exc:
-            # 404 (already gone) is a successful teardown; anything else propagates.
-            if exc.status_code == 404:
-                return
-            raise
 
     def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
         resp = self._request(

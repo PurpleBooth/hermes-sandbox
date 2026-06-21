@@ -12,20 +12,13 @@ IPv4 is present in the network array.
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
-import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
 from .provider import (
     ApiError,
-    CloudProvider,
-    RequestFn,
+    RestCloudProvider,
     VMInstance,
     poll_until,
     register_provider,
@@ -35,34 +28,6 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.digitalocean.com/v2"
 _TAG = "hermes-vm-sandbox"
-
-
-def _request(
-    method: str,
-    path: str,
-    token: str,
-    body: dict[str, Any] | None = None,
-    timeout: int = 30,
-) -> dict[str, Any]:
-    url = f"{API_BASE}/{path.lstrip('/')}"
-    data = None
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-    }
-    if body is not None:
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as exc:
-        detail = ""
-        with contextlib.suppress(Exception):
-            detail = exc.read().decode("utf-8", errors="replace")
-        raise ApiError(method, path, status_code=exc.code, detail=detail) from exc
 
 
 def _public_ipv4(droplet: dict[str, Any]) -> str:
@@ -99,30 +64,18 @@ def _to_vm(droplet: dict[str, Any]) -> VMInstance:
 
 
 @register_provider
-class DigitalOceanProvider(CloudProvider):
+class DigitalOceanProvider(RestCloudProvider):
     """DigitalOcean implementation."""
 
     name = "digitalocean"
+    api_base = API_BASE
     token_env_keys = ("DIGITALOCEAN_TOKEN", "DO_API_TOKEN", "VM_SANDBOX_TOKEN")
     default_region = "fra1"
     default_image = "ubuntu-24-04-x64"
     default_instance_type = "s-2vcpu-4gb"
 
-    def __init__(
-        self,
-        token: str,
-        poll_interval: float = 3.0,
-        poll_timeout: int = 180,
-        request_fn: RequestFn | None = None,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        if not token:
-            raise ValueError("DigitalOceanProvider requires a non-empty token")
-        self.token = token
-        self.poll_interval = poll_interval
-        self.poll_timeout = poll_timeout
-        self._request: RequestFn = request_fn or _request
-        self._sleep: Callable[[float], None] = sleep
+    def _delete_path(self, vm_id: str) -> str:
+        return f"/droplets/{vm_id}"
 
     # CloudProvider maps "running" to is_running(); DO uses "active".
     # Override the status normalisation by reusing VMInstance._RUNNING_STATUSES
@@ -187,15 +140,6 @@ class DigitalOceanProvider(CloudProvider):
         resp = self._request("GET", f"/droplets/{vm_id}", self.token)
         return self._to_vm_running_aware(resp.get("droplet", {}))
 
-    def teardown(self, vm_id: str) -> None:
-        try:
-            self._request("DELETE", f"/droplets/{vm_id}", self.token)
-        except ApiError as exc:
-            # 404 (already gone) is a successful teardown; anything else propagates.
-            if exc.status_code == 404:
-                return
-            raise
-
     def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
         # DigitalOcean tags carry no value component — the tag name is the label
         # key.  Query by the caller's label_key so a non-default tag is honoured.
@@ -208,7 +152,7 @@ class DigitalOceanProvider(CloudProvider):
         """Upload the public key (idempotent) and return its DO key id (str)."""
         try:
             listing = self._request("GET", "/account/keys", self.token)
-        except RuntimeError:
+        except ApiError:
             listing = {"ssh_keys": []}
         for key in listing.get("ssh_keys", []):
             if key.get("name") == name or key.get("public_key", "").strip() == public_key:
