@@ -1,0 +1,102 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-vm-sandbox"
+version = "0.1.0"
+description = "Cloud-VM terminal sandbox plugin for Hermes Agent (Hetzner + DigitalOcean)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "billie"}]
+dependencies = []  # stdlib only — urllib for cloud REST, ssh-keygen/ssh via subprocess
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11"]
+
+# PEP 735 dependency groups — uv syncs these by default (no --extra needed).
+[dependency-groups]
+dev = ["pytest>=7", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.setuptools]
+packages = ["vm_sandbox"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-ra",              # show short summary of all except passed
+    "--strict-markers", # typo'd @pytest.mark.foo -> error, not silent skip
+    "--cov=vm_sandbox", # measure coverage of the plugin package
+    "--cov-report=term-missing",
+    "--cov-branch",     # branch coverage, not just line
+]
+filterwarnings = [
+    "error",            # warnings are failures — catch regressions early
+]
+
+# ── ruff ────────────────────────────────────────────────────────────────────
+# Match Hermes-agent's relaxed style: line-length 100, target py3.11.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".git", "__pycache__", ".pytest_cache"]
+
+[tool.ruff.lint]
+# Start conservative — real bugs + style that catches mistakes.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (unused vars, imports, etc.)
+    "W",    # pycodestyle warnings
+    "I",    # isort (import sorting)
+    "UP",   # pyupgrade (modernize syntax)
+    "B",    # flake8-bugbear (likely-buggy patterns)
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",  # line-too-long handled by formatter; we don't enforce hard wrap
+    "B008",  # function-call-in-default-argument (used for dataclass defaults)
+    "SIM108", # ternary-vs-if — explicit if/else is clearer for our case
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "E402",  # module-level imports after sys.path manipulation in conftest
+    "F401",  # unused imports in test fixtures are common
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ── coverage ────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["vm_sandbox"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+# ── mypy ────────────────────────────────────────────────────────────────────
+# Strict on the plugin source; lenient on tests (they exercise runtime shapes
+# mypy can't always see, e.g. injecting fake HTTP functions).
+[tool.mypy]
+python_version = "3.11"
+packages = ["vm_sandbox"]
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+# Hermes itself isn't typed/installed as a dependency — we only import it
+# lazily inside functions, so treat it as untyped/ignore.
+ignore_missing_imports = true
+exclude = ["tests/"]

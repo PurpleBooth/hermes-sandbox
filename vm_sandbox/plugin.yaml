@@ -1,0 +1,9 @@
+name: vm-sandbox
+version: 0.1.0
+description: "Cloud-VM terminal sandbox for Hermes. Provisions a Hetzner or DigitalOcean VM on session start and routes Hermes' ssh terminal backend (shell, file tools, execute_code) into it. Enables Docker builds and root-level work in an isolated, ephemeral machine."
+author: billie
+hooks:
+  - on_session_start
+  - on_session_end
+provides_tools: []
+requires_env: []

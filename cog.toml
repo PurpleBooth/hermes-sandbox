@@ -1,0 +1,56 @@
+# ── Cocogitto configuration ─────────────────────────────────────────────────
+# Conventional commits + semver releases. See https://docs.cocogitto.io/
+#
+# Release flow (`just release`):
+#   1. cog bump --auto         → determines next version from commit history
+#   2. pre_bump_hooks          → bumps version in pyproject.toml
+#   3. changelog appended to CHANGELOG.md
+#   4. version commit + tag (vX.Y.Z) created
+#   5. post_bump_hooks         → (no auto-push; run `just push` manually)
+
+tag_prefix = "v"
+ignore_merge_commits = true
+ignore_fixup_commits = true
+# Only allow releases from main — prevents accidental bumps from feature branches.
+branch_whitelist = ["main"]
+
+# Bump the Python package version in pyproject.toml so the git tag and the
+# shipped version always match.  {{version}} is substituted by cocogitto.
+pre_bump_hooks = [
+    "./scripts/bump-version.sh {{version}}",
+]
+
+# No auto-push: there may be no remote configured yet, and the user prefers
+# explicit control.  Use `just push` after a release to push commits + tags.
+post_bump_hooks = []
+
+[changelog]
+path = "CHANGELOG.md"
+template = "remote"
+remote = "codeberg.org"
+owner = "PurpleBooth"
+repository = "vm-sandbox-hermes"
+authors = [
+    { signature = "billie.thompson@example.com", username = "billie" },
+]
+
+# Custom commit types beyond the default angular set.  We keep the defaults
+# and just make sure `chore` bumps patch when it touches release plumbing.
+[commit_types.chore]
+bump_patch = true
+
+# Git hooks managed by cocogitto (`cog install-hook -a`).
+# Chains conventional-commit verification (cog) with git-mit (co-author
+# attribution). git-mit binaries are optional — skipped if not on PATH.
+#
+# NOTE: cocogitto 7.0 has a bug — it writes the prepare-commit-msg hook as
+# "pre-commit-msg" (wrong), but git and cog commit look for "prepare-commit-msg".
+# The justfile `cog-install-hooks` recipe renames it after install.
+[git_hooks.pre-commit]
+script = "command -v mit-pre-commit >/dev/null 2>&1 && mit-pre-commit || true"
+
+[git_hooks.pre-prepare-commit-msg]
+script = "command -v mit-prepare-commit-msg >/dev/null 2>&1 && mit-prepare-commit-msg $1 $2 $3 || true"
+
+[git_hooks.commit-msg]
+script = "cog verify --file $1 && (command -v mit-commit-msg >/dev/null 2>&1 && mit-commit-msg $1 || true)"
