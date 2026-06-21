@@ -61,7 +61,7 @@ class SandboxConfig:
             return env.get(key, default)
 
         provider_name = _get("VM_SANDBOX_PROVIDER", "hetzner")
-        token = _resolve_provider_token(provider_name, env)
+        token = _resolve_token(provider_name, env)
 
         # DO defaults differ from Hetzner.
         if provider_name == "digitalocean":
@@ -89,18 +89,17 @@ class SandboxConfig:
         return bool(self.token) or self.provider_name == "fake"
 
 
-def _resolve_provider_token(provider_name: str, env: dict[str, str]) -> str:
-    """Pick the right cloud token env var for the configured provider."""
-    if provider_name == "hetzner":
-        return env.get("HCLOUD_TOKEN") or env.get("VM_SANDBOX_TOKEN") or ""
-    if provider_name == "digitalocean":
-        return (
-            env.get("DIGITALOCEAN_TOKEN")
-            or env.get("DO_API_TOKEN")
-            or env.get("VM_SANDBOX_TOKEN")
-            or ""
-        )
-    return env.get("VM_SANDBOX_TOKEN") or ""
+def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
+    """Resolve the API token by delegating to the provider class.
+
+    Falls back to ``VM_SANDBOX_TOKEN`` if the provider isn't registered yet
+    (e.g. during early config loading before provider modules are imported).
+    """
+    try:
+        from .provider import get_provider_class
+        return get_provider_class(provider_name).resolve_token(env)
+    except KeyError:
+        return env.get("VM_SANDBOX_TOKEN") or ""
 
 
 class VMLifecycleManager:

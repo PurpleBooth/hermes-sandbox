@@ -112,6 +112,7 @@ class HetznerProvider(CloudProvider):
     """Hetzner Cloud implementation."""
 
     name = "hetzner"
+    token_env_keys = ("HCLOUD_TOKEN", "VM_SANDBOX_TOKEN")
 
     def __init__(
         self,
