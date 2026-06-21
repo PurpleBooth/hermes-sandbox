@@ -31,20 +31,20 @@ hermes config set terminal.backend ssh >/dev/null
 SPECS=(docs/references/*.md docs/tasks/fake-provider.md)
 
 if [ -n "${HCLOUD_TOKEN:-}" ]; then
-    SPECS+=(docs/tasks/hetzner-provider.md)
+	SPECS+=(docs/tasks/hetzner-provider.md)
 else
-    echo "HCLOUD_TOKEN not set — skipping Hetzner provider task spec"
+	echo "HCLOUD_TOKEN not set — skipping Hetzner provider task spec"
 fi
 
 if [ -n "${DIGITALOCEAN_TOKEN:-${DO_API_TOKEN:-}}" ]; then
-    SPECS+=(docs/tasks/digitalocean-provider.md)
+	SPECS+=(docs/tasks/digitalocean-provider.md)
 else
-    echo "DIGITALOCEAN_TOKEN not set — skipping DigitalOcean provider task spec"
+	echo "DIGITALOCEAN_TOKEN not set — skipping DigitalOcean provider task spec"
 fi
 
 # Override with explicit arguments if provided.
 if [ $# -gt 0 ]; then
-    SPECS=("$@")
+	SPECS=("$@")
 fi
 
 # Forward HERMES_HOME and any cloud tokens to every script block.
@@ -52,19 +52,19 @@ fi
 # don't pick up a stale value from the caller's environment — specs that
 # need it set it inline (e.g. VM_SANDBOX_PROVIDER=fake hermes vm-sandbox ...).
 ENV_ARGS=(
-    --env "HERMES_HOME=$TEMPORARY_HOME"
-    --unset-env VM_SANDBOX_PROVIDER
+	--env "HERMES_HOME=$TEMPORARY_HOME"
+	--unset-env VM_SANDBOX_PROVIDER
 )
 
 # Forward cloud tokens if present in the caller's environment.
 for var in HCLOUD_TOKEN DIGITALOCEAN_TOKEN DO_API_TOKEN; do
-    eval "val=\${${var}:-}"
-    if [ -n "$val" ]; then
-        ENV_ARGS+=(--env "${var}=${val}")
-    fi
+	eval "val=\${${var}:-}"
+	if [ -n "$val" ]; then
+		ENV_ARGS+=(--env "${var}=${val}")
+	fi
 done
 
 exec specdown run \
-    --temporary-workspace-dir \
-    "${ENV_ARGS[@]}" \
-    "${SPECS[@]}"
+	--temporary-workspace-dir \
+	"${ENV_ARGS[@]}" \
+	"${SPECS[@]}"
