@@ -16,7 +16,12 @@ branch_whitelist = ["main"]
 
 # Bump the Python package version in pyproject.toml so the git tag and the
 # shipped version always match.  {{version}} is substituted by cocogitto.
+#
+# The end-to-end specdown gate runs FIRST — if the build→install→import
+# lifecycle is broken, we never cut a release.  `just specdown` bootstraps
+# specdown itself if it isn't installed.
 pre_bump_hooks = [
+    "just specdown",
     "./scripts/bump-version.sh {{version}}",
 ]
 

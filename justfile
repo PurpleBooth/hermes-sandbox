@@ -29,8 +29,23 @@ fix:
 fmt:
     uv run ruff format .
 
-# Full gate: lint + test (run before pushing)
-check: lint test
+# End-to-end specdown tests (build → install → import lifecycle).
+# Installs specdown if not on PATH, then runs the markdown specs in specs/.
+specdown:
+    @command -v specdown >/dev/null 2>&1 || { \
+        echo "specdown not found — installing latest release to a temp dir"; \
+        dir="$$(mktemp -d)"; \
+        curl -L https://github.com/specdown/specdown/releases/latest/download/specdown-x86_64-unknown-linux-gnu \
+            -o "$$dir/specdown"; \
+        chmod +x "$$dir/specdown"; \
+        export PATH="$$dir:$$PATH"; \
+        specdown run --temporary-workspace-dir specs/*.md; \
+        exit $$?; \
+    }
+    specdown run --temporary-workspace-dir specs/*.md
+
+# Full gate: lint + test + end-to-end (run before pushing/releasing)
+check: lint test specdown
     @echo "✓ all green"
 
 # Show line coverage in terminal (no HTML)

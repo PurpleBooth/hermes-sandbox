@@ -1,0 +1,120 @@
+name: CI
+
+# Runs on every push and pull request. The `bump` job (which cuts a release
+# via cocogitto) only fires on `main` and only after test + lint + specdown
+# all pass — so a broken build→install→import lifecycle can never ship.
+on:
+  push:
+    paths-ignore:
+      - CHANGELOG.md
+  pull_request:
+    paths-ignore:
+      - CHANGELOG.md
+
+env:
+  UV_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: codeberg-small
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest
+
+  lint:
+    name: Lint
+    runs-on: codeberg-small
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Mypy strict
+        run: uv run mypy
+
+  specdown:
+    name: End-to-end (specdown)
+    runs-on: codeberg-small
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Specdown ships prebuilt static binaries — no Rust toolchain needed.
+      - name: Install specdown
+        run: |
+          install -d ~/.local/bin
+          curl -L https://github.com/specdown/specdown/releases/latest/download/specdown-x86_64-unknown-linux-gnu \
+            -o ~/.local/bin/specdown
+          chmod +x ~/.local/bin/specdown
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run end-to-end specs
+        run: specdown run --temporary-workspace-dir specs/*.md
+
+  bump:
+    name: Bump version
+    needs: [test, lint, specdown]
+    if: github.ref == 'refs/heads/main'
+    runs-on: codeberg-small
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install just
+        uses: https://codeberg.org/PurpleBooth/common-pipelines/actions/install-just@main
+        with:
+          version: latest
+
+      - name: Install cocogitto
+        uses: https://codeberg.org/PurpleBooth/common-pipelines/actions/install-cocogitto@main
+        with:
+          version: latest
+
+      - name: Configure Git user
+        run: |
+          git config user.name "Forgejo Actions"
+          git config user.email "forgejo-actions@codeberg.org"
+
+      # The end-to-end specdown gate also runs here as a cog pre_bump_hook
+      # (see cog.toml), so a release can never be cut with a broken lifecycle.
+      - name: Bump version with cog
+        run: |
+          if VERSION=$(cog bump --dry-run --auto 2>/dev/null); then
+            echo "Bumping to $VERSION"
+            cog bump --auto
+            git remote set-url origin https://token:${{ secrets.GITHUB_TOKEN }}@codeberg.org/${{ github.repository }}.git
+            git push origin main --follow-tags
+          else
+            echo "No version bump needed"
+          fi
