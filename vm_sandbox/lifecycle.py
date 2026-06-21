@@ -80,7 +80,7 @@ class SandboxConfig:
         return bool(self.token) or self.provider_name == "fake"
 
 
-@dataclass
+@dataclass(frozen=True)
 class SandboxStatus:
     """A snapshot of the sandbox VM: persisted state plus a live probe.
 
@@ -107,6 +107,20 @@ class SandboxStatus:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class _LiveProbe:
+    """Result of a best-effort provider ``get()`` during ``status()``.
+
+    A small immutable value so ``status()`` builds the final ``SandboxStatus``
+    in one shot instead of mutating fields after construction.
+    """
+
+    status: str
+    ip: str
+    alive: bool
+    error: str = ""
 
 
 def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
@@ -241,7 +255,9 @@ class VMLifecycleManager:
         if not state:
             return None
         vm_id = str(state.get("vm_id", ""))
-        st = SandboxStatus(
+        # Probe liveness first, then build the value once — no mutation.
+        probe = self._probe_vm(vm_id)
+        return SandboxStatus(
             vm_id=vm_id,
             provider=str(state.get("provider", "")),
             name=str(state.get("name", "")),
@@ -252,18 +268,23 @@ class VMLifecycleManager:
             ssh_user=str(state.get("ssh_user", "")),
             created_at=float(state.get("created_at", 0.0)),
             last_used=float(state.get("last_used", 0.0)),
+            live_status=probe.status,
+            live_ip=probe.ip,
+            alive=probe.alive,
+            error=probe.error,
         )
-        # Best-effort liveness check; fall back to "unknown/dead" on error.
+
+    def _probe_vm(self, vm_id: str) -> _LiveProbe:
+        """Best-effort provider liveness check, returned as an immutable value.
+
+        Returns a dead/unknown probe on any error rather than raising, so
+        ``status()`` can report recorded state even when the provider is down.
+        """
         try:
             vm = self.provider.get(vm_id)
-            st.live_status = vm.status
-            st.live_ip = vm.public_ip
-            st.alive = vm.is_running()
         except Exception as exc:
-            st.live_status = "unknown"
-            st.alive = False
-            st.error = str(exc)
-        return st
+            return _LiveProbe(status="unknown", ip="", alive=False, error=str(exc))
+        return _LiveProbe(status=vm.status, ip=vm.public_ip, alive=vm.is_running())
 
     def ensure_vm(self, max_key_attempts: int = 1) -> VMInstance:
         """Return a running sandbox VM, reusing or provisioning as needed.

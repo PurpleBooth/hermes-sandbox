@@ -239,3 +239,18 @@ def test_status_marks_dead_when_provider_forgets(tmp_path, fake_key_factory):
     assert st is not None
     assert st.alive is False
     assert st.error  # recorded the provider error
+
+
+def test_sandboxstatus_is_frozen():
+    """SandboxStatus is an immutable value object."""
+    import dataclasses
+
+    from vm_sandbox.lifecycle import SandboxStatus
+
+    st = SandboxStatus(
+        vm_id="1", provider="fake", name="n", region="r", public_ip="1.2.3.4",
+        public_ipv6="", ssh_host="1.2.3.4", ssh_user="root",
+        created_at=0.0, last_used=0.0, alive=True,
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        st.alive = False  # type: ignore[misc]
