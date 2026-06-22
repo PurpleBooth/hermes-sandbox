@@ -26,9 +26,19 @@ hermes plugins enable sandbox >/dev/null
 hermes config set terminal.backend ssh >/dev/null
 
 # Build the spec file list.  The dry-run provider and reference specs always
-# run.  The Hetzner and DigitalOcean task specs only run when their tokens
-# are available — otherwise they'd fail on the provision step.
-SPECS=(README.md docs/references/*.md docs/tasks/dry-run-provider.md)
+# run.  The QEMU task spec runs when the local binaries are installed (it's a
+# local hypervisor, not a cloud API).  The Hetzner and DigitalOcean task specs
+# only run when their tokens are available — otherwise they'd fail on the
+# provision step.
+SPECS=(README.md docs/references/*.md docs/tasks/dry-run-provider.md docs/tasks/concurrent-sessions.md docs/tasks/shared-session.md)
+
+if command -v qemu-system-x86_64 >/dev/null 2>&1 \
+	&& { command -v genisoimage >/dev/null 2>&1 || command -v mkisofs >/dev/null 2>&1 \
+	     || command -v xorrisofs >/dev/null 2>&1 || command -v xorriso >/dev/null 2>&1; }; then
+	SPECS+=(docs/tasks/qemu-provider.md)
+else
+	echo "qemu-system-x86_64 or an ISO builder (genisoimage/mkisofs/xorriso) not found — skipping QEMU provider task spec"
+fi
 
 if [ -n "${HCLOUD_TOKEN:-}" ]; then
 	SPECS+=(docs/tasks/hetzner-provider.md)
