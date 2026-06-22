@@ -5,6 +5,11 @@ credentials required.  Use it to try the plugin, see how the lifecycle works,
 and verify your setup: it goes through the exact same provision → status →
 teardown flow as a real provider.
 
+See the [Configuration Reference](../references/configuration.md) for the full
+set of environment variables.  For real-provider equivalents, see the
+[Hetzner](hetzner-provider.md) and [DigitalOcean](digitalocean-provider.md)
+task guides.
+
 ## Check there is no VM yet
 
 Before you start, there is no sandbox VM:

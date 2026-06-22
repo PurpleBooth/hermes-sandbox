@@ -6,7 +6,9 @@ via the shared state file and reuse it rather than paying for a new provision.
 
 This is the complement of [concurrent sessions](concurrent-sessions.md), where
 each session gets its own VM.  Here, a second session's provision reuses the
-existing VM and only one teardown is needed to clean up.
+existing VM and only one teardown is needed to clean up.  See the
+[Configuration Reference](../references/configuration.md) for the full
+`SANDBOX_MODE` documentation.
 
 ## Provision the shared VM
 

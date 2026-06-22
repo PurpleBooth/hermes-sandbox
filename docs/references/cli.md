@@ -4,7 +4,11 @@ Every `hermes sandbox` subcommand, its output, and its exit code.
 
 The CLI is available once the plugin is enabled (`hermes plugins enable
 sandbox`).  All subcommands also work as the in-session slash command
-`/sandbox <subcommand>`.
+`/sandbox <subcommand>`, **except** `available`, which is CLI-only — it
+lists the provider registry, which is only useful during setup.
+
+For environment-variable configuration, see the
+[Configuration Reference](configuration.md).
 
 ## Available providers
 
@@ -17,6 +21,15 @@ hermes sandbox available
 ```text,verify(script_name="available", stream=stdout)
 Registered providers: digitalocean, dry-run, hetzner, qemu
 ```
+
+> **Note:** `available` is CLI-only — it is not available as `/sandbox available`
+> inside a Hermes session.
+
+For a walkthrough of each provider, see the task guides:
+[Hetzner](../tasks/hetzner-provider.md),
+[DigitalOcean](../tasks/digitalocean-provider.md),
+[QEMU](../tasks/qemu-provider.md), and
+[Dry-run](../tasks/dry-run-provider.md).
 
 ## Status
 
@@ -138,3 +151,8 @@ hermes sandbox enable | grep '^\[sandbox\]'
 ```text,verify(script_name="enable", stream=stdout)
 [sandbox] Set terminal.backend=ssh. Restart Hermes to apply.
 ```
+
+## See also
+
+- [Configuration Reference](configuration.md) — every environment variable.
+- [Task guides](../tasks/) — provider walkthroughs and session scenarios.
