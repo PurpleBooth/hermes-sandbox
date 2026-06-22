@@ -317,6 +317,24 @@ def test_status_marks_dead_when_provider_forgets(tmp_path, fake_key_factory):
     assert st.error  # recorded the provider error
 
 
+def test_list_vms_returns_provider_results(tmp_path, fake_key_factory):
+    """list_vms() delegates to provider.list_by_label with the sandbox label."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    mgr.ensure_vm()
+    vms = mgr.list_vms()
+    assert len(vms) == 1
+    assert vms[0].provider == "dry-run"
+    assert vms[0].is_running()
+
+
+def test_list_vms_empty_when_no_vms(tmp_path, fake_key_factory):
+    """list_vms() returns an empty list when no VMs exist on the cloud."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    assert mgr.list_vms() == []
+
+
 def test_sandboxstatus_is_frozen():
     """SandboxStatus is an immutable value object."""
     import dataclasses

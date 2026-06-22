@@ -182,6 +182,10 @@ class VMLifecycleManager:
             return _LiveProbe(status="unknown", ip="", alive=False, error=str(exc))
         return _LiveProbe(status=vm.status, ip=vm.public_ip, alive=vm.is_running())
 
+    def list_vms(self) -> list[VMInstance]:
+        """List all sandbox VMs on the cloud provider (tagged hermes-sandbox)."""
+        return self.provider.list_by_label(LABEL_KEY, LABEL_VALUE)
+
     def ensure_vm(self) -> VMInstance:
         """Return a running sandbox VM, reusing or provisioning as needed.
 
