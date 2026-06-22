@@ -31,16 +31,109 @@ from .models import ApiError, VMInstance
 RequestFn = Callable[..., dict[str, Any]]
 
 #: cloud-init template: creates a non-root ``hermes`` user with passwordless
-#: sudo and the injected SSH key.  Every provider uses this so the sandbox
-#: never connects as (or runs commands as) ``root``.
+#: sudo and the injected SSH key, and pre-installs the toolchain a coding /
+#: research / creative AI agent is likely to invoke.  Every provider uses this
+#: so the sandbox never connects as (or runs commands as) ``root`` and boots
+#: ready to work on first SSH.
 _CLOUD_INIT_USER_DATA = """\
 #cloud-config
+package_update: true
+
 users:
   - name: hermes
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     ssh_authorized_keys:
       - {public_key}
+
+packages:
+  # ── build essentials ──
+  - build-essential
+  - pkg-config
+  - cmake
+  - libssl-dev
+  - libffi-dev
+  - libsqlite3-dev
+  - libbz2-dev
+  - liblzma-dev
+  - zlib1g-dev
+  # ── network / transfer / archives ──
+  - curl
+  - wget
+  - git
+  - rsync
+  - openssh-client
+  - ca-certificates
+  - gnupg
+  - unzip
+  - zip
+  - socat
+  - netcat-openbsd
+  # ── shell / text / search ──
+  - jq
+  - ripgrep
+  - fd-find
+  - fzf
+  - bat
+  - eza
+  - tree
+  - tmux
+  - direnv
+  - zoxide
+  - less
+  # ── languages ──
+  - python3-pip
+  - python3-venv
+  - python3-dev
+  - golang-go
+  - nodejs
+  - npm
+  # ── containers (rootless podman) ──
+  - podman
+  - buildah
+  - skopeo
+  - uidmap
+  - slirp4netns
+  - fuse-overlayfs
+  - catatonit
+  # ── media / creative ──
+  - ffmpeg
+  - imagemagick
+  - poppler-utils
+  - tesseract-ocr
+  - pandoc
+  # ── audio / TTS support ──
+  - espeak-ng
+  - mpg123
+  - sox
+  - libsox-fmt-all
+  - alsa-utils
+  # ── dev quality / data ──
+  - shellcheck
+  - shfmt
+  - sqlite3
+  - gh
+  - htop
+  - graphviz
+
+runcmd:
+  # Canonical binary-name aliases (Ubuntu renames these to avoid conflicts;
+  # an agent will call them by their upstream names).
+  - ln -sf "$(which fdfind)" /usr/local/bin/fd
+  - ln -sf "$(which batcat)" /usr/local/bin/bat
+  # Rootless-podman subuid/subgid ranges for the hermes user.
+  - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 hermes
+  # uv — fast Python package/venv manager.
+  - curl -LsSf https://astral.sh/uv/install.sh | sh
+  # rustup + stable toolchain (current Rust; apt's is stale).
+  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  # yq (mikefarah Go binary — NOT the apt Python yq wrapper).
+  - |
+    YQ_VER=$(curl -sL https://api.github.com/repos/mikefarah/yq/releases/latest | grep tag_name | cut -d '"' -f4)
+    wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${{YQ_VER}}/yq_linux_amd64"
+    chmod +x /usr/local/bin/yq
+  # edge-tts — open-source Microsoft Edge TTS (no API key required).
+  - python3 -m pip install --break-system-packages edge-tts
 """
 
 
@@ -51,6 +144,11 @@ def build_cloud_init_user_data(public_key: str) -> str:
     across QEMU (NoCloud seed ISO) and cloud providers (``user_data`` API
     field).  The caller is responsible for base64-encoding when the API
     requires it (e.g. Hetzner).
+
+    The template pre-installs a curated toolchain (build essentials, common
+    languages, media/TTS tools, modern shell utilities) so the sandbox boots
+    ready to work.  The ``${{...}}`` escaping preserves cloud-init's literal
+    shell variable after Python's ``str.format`` runs.
     """
     return _CLOUD_INIT_USER_DATA.format(public_key=public_key)
 

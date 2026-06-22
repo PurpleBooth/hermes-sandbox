@@ -209,7 +209,13 @@ def test_qemu_provision_builds_cloud_init_seed_iso():
 
 
 def test_qemu_provision_writes_cloud_init_user_data(tmp_path):
-    """The user-data creates a 'hermes' user with the SSH key and sudo access."""
+    """The user-data creates a 'hermes' user, installs the toolchain, and embeds
+    the SSH key.
+
+    The exact tool list is an implementation detail; these assertions pin the
+    high-value categories a user is likely to need: a build toolchain, common
+    languages, media/TTS tools, and modern shell utilities.
+    """
     runner = _fake_runner()
     p = QemuProvider(runner=runner, iso_bin="genisoimage", work_dir=tmp_path)
     p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "ssh-ed25519 AAAAB3Nza...")
@@ -222,6 +228,16 @@ def test_qemu_provision_writes_cloud_init_user_data(tmp_path):
     assert "sudo" in user_data, (
         "the hermes user must have sudo access (the sandbox runs root commands)"
     )
+    # Tool categories that should be pre-installed via cloud-init.
+    assert "packages:" in user_data, "user-data must install a toolchain via packages:"
+    assert "ffmpeg" in user_data, "ffmpeg must be pre-installed (media/TTS pipelines)"
+    assert "python3-venv" in user_data, "python3-venv must be pre-installed (execute_code)"
+    assert "ripgrep" in user_data, "ripgrep must be pre-installed (search)"
+    assert "jq" in user_data, "jq must be pre-installed (JSON wrangling)"
+    assert "runcmd:" in user_data, (
+        "user-data must have a runcmd: block for post-install setup (aliases, pip tools)"
+    )
+    assert "edge-tts" in user_data, "edge-tts must be installed via runcmd (open-source TTS)"
 
 
 def test_qemu_default_ssh_user_is_hermes():
