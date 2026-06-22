@@ -11,6 +11,12 @@ When `SANDBOX_IMAGE` is unset, the provider downloads the Ubuntu 24.04
 cloud image (~600 MB) to a local cache on first use and reuses it
 thereafter.
 
+See the [Configuration Reference](../references/configuration.md) for the
+QEMU provider defaults (`2cpu-4gb`, `local`) and all environment variables.
+For cloud-based alternatives, see the
+[Hetzner](hetzner-provider.md) and [DigitalOcean](digitalocean-provider.md)
+task guides.
+
 ## Check there is no VM yet
 
 Before you start, there is no sandbox VM:

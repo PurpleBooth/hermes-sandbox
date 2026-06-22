@@ -5,7 +5,9 @@ on it, then tear it down when you are done.
 
 Set `SANDBOX_PROVIDER=hetzner` and `HCLOUD_TOKEN` in `~/.hermes/.env`
 (or export them in your shell).  In CI the token comes from the
-`HETZNER_API_TOKEN` secret.
+`HETZNER_API_TOKEN` secret.  See the
+[Configuration Reference](../references/configuration.md) for the full
+set of environment variables and provider-specific defaults.
 
 ## Check there is no VM yet
 

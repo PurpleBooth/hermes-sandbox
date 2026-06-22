@@ -20,10 +20,10 @@ ssh terminal backend is the stable default. Restart Hermes after install.
 
 | Provider | `SANDBOX_PROVIDER` | Token | Notes |
 |---|---|---|---|
-| Hetzner Cloud | `hetzner` | `HCLOUD_TOKEN` | Default. EU regions, IPv4+IPv6. |
-| DigitalOcean | `digitalocean` | `DIGITALOCEAN_TOKEN` (or `DO_API_TOKEN`) | Global regions, IPv4+IPv6. |
-| QEMU | `qemu` | none | Local hypervisor. Auto-downloads Ubuntu 24.04 cloud image if `SANDBOX_IMAGE` is unset. |
-| Dry-run | `dry-run` | none | In-memory simulation for testing. |
+| [Hetzner Cloud](docs/tasks/hetzner-provider.md) | `hetzner` | `HCLOUD_TOKEN` | Default. EU regions, IPv4+IPv6. |
+| [DigitalOcean](docs/tasks/digitalocean-provider.md) | `digitalocean` | `DIGITALOCEAN_TOKEN` (or `DO_API_TOKEN`) | Global regions, IPv4+IPv6. |
+| [QEMU](docs/tasks/qemu-provider.md) | `qemu` | none | Local hypervisor. Auto-downloads Ubuntu 24.04 cloud image if `SANDBOX_IMAGE` is unset. |
+| [Dry-run](docs/tasks/dry-run-provider.md) | `dry-run` | none | In-memory simulation for testing. |
 
 List the providers available on your system:
 
@@ -37,7 +37,9 @@ Registered providers: digitalocean, dry-run, hetzner, qemu
 
 ## Configure
 
-Put these in `~/.hermes/.env`:
+Put these in `~/.hermes/.env` (see the
+[Configuration Reference](docs/references/configuration.md) for the full
+table of provider-specific defaults):
 
     SANDBOX_PROVIDER=hetzner              # hetzner | digitalocean | dry-run | qemu
     HCLOUD_TOKEN=***                       # or DIGITALOCEAN_TOKEN / DO_API_TOKEN
@@ -139,7 +141,8 @@ SANDBOX_PROVIDER=dry-run hermes sandbox status
 
 ## Session commands
 
-Inside a Hermes session, use the slash command:
+Inside a Hermes session, use the slash command (full details in the
+[CLI Reference](docs/references/cli.md)):
 
     /sandbox status       # show the current sandbox VM
     /sandbox provision    # provision/reuse now
@@ -156,7 +159,9 @@ From the shell:
 
 ## Multiple sessions
 
-Set `SANDBOX_MODE` to control how sessions share VMs:
+Set `SANDBOX_MODE` to control how sessions share VMs (see
+[concurrent sessions](docs/tasks/concurrent-sessions.md) and
+[shared sessions](docs/tasks/shared-session.md) for worked examples):
 
 - **`shared`** (default): one VM for all sessions. The VM is kept warm and
   reused. State lives at `~/.hermes/sandbox/state.json`.
@@ -171,6 +176,19 @@ Set `SANDBOX_MODE` to control how sessions share VMs:
 previous session is reused. The SSH keypair lives at
 `~/.hermes/sandbox/hermes-sandbox` (private, `0600`) and
 `~/.hermes/sandbox/hermes-sandbox.pub` (public).
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [CLI Reference](docs/references/cli.md) | Every `hermes sandbox` subcommand, output, and exit code. |
+| [Configuration Reference](docs/references/configuration.md) | Every environment variable and provider-specific default. |
+| [Hetzner task](docs/tasks/hetzner-provider.md) | Provision a real Hetzner Cloud server end-to-end. |
+| [DigitalOcean task](docs/tasks/digitalocean-provider.md) | Provision a real DigitalOcean droplet end-to-end. |
+| [QEMU task](docs/tasks/qemu-provider.md) | Run a local VM via QEMU — no cloud account needed. |
+| [Dry-run task](docs/tasks/dry-run-provider.md) | Try the full lifecycle in memory — no credentials. |
+| [Shared sessions](docs/tasks/shared-session.md) | One VM reused across all sessions (`SANDBOX_MODE=shared`). |
+| [Concurrent sessions](docs/tasks/concurrent-sessions.md) | One VM per session (`SANDBOX_MODE=isolated`). |
 
 ## Develop
 

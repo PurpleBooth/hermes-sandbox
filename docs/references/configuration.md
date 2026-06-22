@@ -16,6 +16,12 @@ needs no cloud token but requires `qemu-system-x86_64` installed.  When
 `SANDBOX_IMAGE` is unset, the QEMU provider automatically downloads the
 Ubuntu 24.04 cloud image to a local cache on first use.
 
+For step-by-step walkthroughs with each provider, see the task guides:
+[Hetzner](../tasks/hetzner-provider.md),
+[DigitalOcean](../tasks/digitalocean-provider.md),
+[QEMU](../tasks/qemu-provider.md), and
+[Dry-run](../tasks/dry-run-provider.md).
+
 ## Cloud credentials
 
 | Variable | Provider | Notes |
@@ -30,13 +36,19 @@ are always configured.
 
 ## VM settings
 
-| Variable | Default (hetzner) | Default (digitalocean) | Default (dry-run) |
-|---|---|---|---|
-| `SANDBOX_INSTANCE_TYPE` | `cx23` | `s-2vcpu-4gb` | `cx23` |
-| `SANDBOX_REGION` | `nbg1` | `fra1` | `nbg1` |
-| `SANDBOX_IMAGE` | `ubuntu-24.04` | `ubuntu-24-04-x64` | `ubuntu-24.04` |
-| `SANDBOX_SSH_USER` | `root` | `root` | `root` |
-| `SANDBOX_NAME` | `hermes-sandbox` | `hermes-sandbox` | `hermes-sandbox` |
+| Variable | Default (hetzner) | Default (digitalocean) | Default (qemu) | Default (dry-run) |
+|---|---|---|---|---|
+| `SANDBOX_INSTANCE_TYPE` | `cx23` | `s-2vcpu-4gb` | `2cpu-4gb` | `cx23` |
+| `SANDBOX_REGION` | `nbg1` | `fra1` | `local` | `nbg1` |
+| `SANDBOX_IMAGE` | `ubuntu-24.04` | `ubuntu-24-04-x64` | Ubuntu 24.04 cloud image (URL) | `ubuntu-24.04` |
+| `SANDBOX_SSH_USER` | `root` | `root` | `root` | `root` |
+| `SANDBOX_NAME` | `hermes-sandbox` | `hermes-sandbox` | `hermes-sandbox` | `hermes-sandbox` |
+
+The `dry-run` provider reuses the base defaults (same as `hetzner`) since it
+never talks to a real cloud.  For the `qemu` provider, `SANDBOX_REGION` is a
+cosmetic label (always `local`) and `SANDBOX_IMAGE` defaults to the Ubuntu 24.04
+server cloud image URL, which the provider downloads and caches on first use —
+see the [QEMU task guide](../tasks/qemu-provider.md).
 
 ## Teardown
 
@@ -68,7 +80,8 @@ so a VM created in a previous session is reused.  The SSH keypair lives at
 ## Verifying configuration
 
 A provider is "configured" when it has a token, or when the provider is
-`dry-run`.  You can check by running `hermes sandbox status`:
+`dry-run` or `qemu`.  You can check by running `hermes sandbox status`
+(see the [CLI Reference](cli.md)):
 
 ```shell,script(name="dry-run-configured", expected_exit_code=0)
 SANDBOX_PROVIDER=dry-run hermes sandbox status

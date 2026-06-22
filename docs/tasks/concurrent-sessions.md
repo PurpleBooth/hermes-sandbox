@@ -3,7 +3,11 @@
 Each Hermes session gets its own sandbox VM — provisioning in one session
 must never reuse or clobber a VM from another.  This spec verifies the
 isolation by running two provision cycles back-to-back with the dry-run
-provider and confirming each session gets a completely distinct VM.
+provider and confirming each session gets a completely distinct VM.  This is
+the `SANDBOX_MODE=isolated` behaviour — see the
+[Configuration Reference](../references/configuration.md) for the full
+`SANDBOX_MODE` documentation, and the [shared-session](shared-session.md)
+task for the complementary `SANDBOX_MODE=shared` walkthrough.
 
 ## Session A: provision a VM
 
