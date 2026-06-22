@@ -51,8 +51,9 @@ class SandboxConfig:
         )
 
     def is_configured(self) -> bool:
-        # A token is only required for real providers; fakes don't need one.
-        return bool(self.token) or self.provider_name == "fake"
+        # A token is only required for real providers; the dry-run provider
+        # simulates provisioning in memory and needs no token.
+        return bool(self.token) or self.provider_name == "dry-run"
 
 
 def _resolve_token(provider_name: str, env: dict[str, str]) -> str:

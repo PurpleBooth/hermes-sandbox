@@ -15,7 +15,7 @@ hermes vm-sandbox available
 ```
 
 ```text,verify(script_name="available", stream=stdout)
-Registered providers: digitalocean, fake, hetzner
+Registered providers: digitalocean, dry-run, hetzner
 ```
 
 ## Status
@@ -23,7 +23,7 @@ Registered providers: digitalocean, fake, hetzner
 Show the current sandbox VM.  When no VM has been provisioned yet:
 
 ```shell,script(name="status-none", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=fake hermes vm-sandbox status
+VM_SANDBOX_PROVIDER=dry-run hermes vm-sandbox status
 ```
 
 ```text,verify(script_name="status-none", stream=stdout)
@@ -46,11 +46,11 @@ hermes vm-sandbox status
 Provision (or reuse) a sandbox VM.  Returns the VM id, IP, and provider.
 
 ```shell,script(name="provision", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=fake hermes vm-sandbox provision
+VM_SANDBOX_PROVIDER=dry-run hermes vm-sandbox provision
 ```
 
 ```text,verify(script_name="provision", stream=stdout)
-[vm-sandbox] VM ready: fake-1 @ 10.0.0.1 (fake)
+[vm-sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
 ```
 
 ## Teardown
@@ -58,7 +58,7 @@ VM_SANDBOX_PROVIDER=fake hermes vm-sandbox provision
 Destroy the recorded sandbox VM.
 
 ```shell,script(name="teardown", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=fake hermes vm-sandbox teardown
+VM_SANDBOX_PROVIDER=dry-run hermes vm-sandbox teardown
 ```
 
 ```text,verify(script_name="teardown", stream=stdout)
@@ -68,7 +68,7 @@ VM_SANDBOX_PROVIDER=fake hermes vm-sandbox teardown
 If there is no VM to tear down, it says so:
 
 ```shell,script(name="teardown-none", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=fake hermes vm-sandbox teardown
+VM_SANDBOX_PROVIDER=dry-run hermes vm-sandbox teardown
 ```
 
 ```text,verify(script_name="teardown-none", stream=stdout)
