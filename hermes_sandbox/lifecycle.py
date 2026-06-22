@@ -186,6 +186,15 @@ class VMLifecycleManager:
         """List all sandbox VMs on the cloud provider (tagged hermes-sandbox)."""
         return self.provider.list_by_label(LABEL_KEY, LABEL_VALUE)
 
+    def recreate(self) -> VMInstance:
+        """Tear down the current VM (if any) and provision a fresh one.
+
+        Useful when a VM is broken or unreachable: destroys the recorded VM,
+        clears state, then provisions a new one in its place.
+        """
+        self.teardown()
+        return self.ensure_vm()
+
     def ensure_vm(self) -> VMInstance:
         """Return a running sandbox VM, reusing or provisioning as needed.
 

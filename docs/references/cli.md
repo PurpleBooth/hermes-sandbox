@@ -88,6 +88,30 @@ SANDBOX_PROVIDER=dry-run hermes sandbox list
 [sandbox] No sandbox VMs found.
 ```
 
+## Recreate
+
+Destroy the current VM and provision a fresh one.  Use this when a VM is
+broken or unreachable — it tears down the old VM and creates a new one in
+its place.
+
+```shell,script(name="recreate", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox recreate
+```
+
+```text,verify(script_name="recreate", stream=stdout)
+[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+```
+
+Clean up the VM created by recreate so it doesn't leak into other specs:
+
+```shell,script(name="recreate-cleanup", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox teardown
+```
+
+```text,verify(script_name="recreate-cleanup", stream=stdout)
+[sandbox] VM torn down.
+```
+
 ## Enable
 
 Set `terminal.backend=ssh` in config.yaml so Hermes' ssh terminal backend is

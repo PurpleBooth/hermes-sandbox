@@ -335,6 +335,30 @@ def test_list_vms_empty_when_no_vms(tmp_path, fake_key_factory):
     assert mgr.list_vms() == []
 
 
+def test_recreate_tears_down_old_and_provisions_new(tmp_path, fake_key_factory):
+    """recreate() destroys the current VM and provisions a fresh one."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    first = mgr.ensure_vm()
+    assert first.id == "dry-run-1"
+
+    second = mgr.recreate()
+    assert second.id != first.id  # new VM
+    # Old VM was torn down on the provider.
+    teardowns = [c for c in provider.calls if c["op"] == "teardown"]
+    assert len(teardowns) == 1
+    assert teardowns[0]["vm_id"] == first.id
+
+
+def test_recreate_when_no_vm_just_provisions(tmp_path, fake_key_factory):
+    """recreate() with no existing state just provisions."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    vm = mgr.recreate()
+    assert vm.is_running()
+    assert vm.id == "dry-run-1"
+
+
 def test_sandboxstatus_is_frozen():
     """SandboxStatus is an immutable value object."""
     import dataclasses

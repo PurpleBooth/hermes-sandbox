@@ -231,6 +231,7 @@ Subcommands:
   provision   Provision/reuse a VM now (also happens on session start)
   teardown    Destroy the recorded sandbox VM
   list        List all sandbox VMs on the cloud
+  recreate    Destroy the current VM and provision a fresh one
   enable      Set terminal.backend=ssh in config.yaml (run once)
   help        This message
 
@@ -284,6 +285,10 @@ def _handle_slash(raw_args: str) -> str | None:
             )
         return "\n".join(lines)
 
+    if sub == "recreate":
+        vm = manager.recreate()
+        return f"[sandbox] VM ready: {vm.id} @ {vm.preferred_ip()} ({vm.provider})"
+
     return f"Unknown subcommand: {sub}\n\n{_HELP}"
 
 
@@ -309,6 +314,7 @@ def _setup_cli(parser: argparse.ArgumentParser) -> None:
     sub.add_parser("provision", help="Provision/reuse a VM now")
     sub.add_parser("teardown", help="Destroy the recorded sandbox VM")
     sub.add_parser("list", help="List all sandbox VMs on the cloud")
+    sub.add_parser("recreate", help="Destroy the current VM and provision a fresh one")
     sub.add_parser("enable", help="Set terminal.backend=ssh in config.yaml")
     sub.add_parser("available", help="List registered providers")
 
@@ -337,7 +343,7 @@ def register(ctx: Any) -> None:
         "sandbox",
         handler=_handle_slash,
         description="Cloud-VM terminal sandbox: provision/status/teardown.",
-        args_hint="<status|provision|teardown|list|enable>",
+        args_hint="<status|provision|teardown|list|recreate|enable>",
     )
     ctx.register_cli_command(
         "sandbox",
