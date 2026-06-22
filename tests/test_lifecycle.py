@@ -357,6 +357,46 @@ def test_recreate_when_no_vm_just_provisions(tmp_path, fake_key_factory):
     assert vm.id  # non-empty UUID
 
 
+def test_cleanup_strays_destroys_unreferenced_vms(tmp_path, fake_key_factory):
+    """cleanup_strays tears down cloud VMs not in the known set."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    # The VM is known — cleanup should leave it alone.
+    destroyed = mgr.cleanup_strays({vm.id})
+    assert destroyed == [], "known VM should not be torn down"
+    assert provider.get(vm.id)  # still exists
+
+    # Now pretend we lost track of it — cleanup should destroy it.
+    destroyed = mgr.cleanup_strays(set())
+    assert vm.id in destroyed, "stray VM should be torn down"
+    with pytest.raises(KeyError):
+        provider.get(vm.id)
+
+
+def test_cleanup_strays_when_no_vms(tmp_path, fake_key_factory):
+    """cleanup_strays returns empty list when no VMs exist on the cloud."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    assert mgr.cleanup_strays(set()) == []
+
+
+def test_cleanup_strays_preserves_known_and_destroys_unknown(tmp_path, fake_key_factory):
+    """cleanup_strays keeps VMs in the known set and destroys the rest."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    vm1 = provider.provision("v1", "t", "r", "i", "k", labels={"hermes-sandbox": "true"})
+    vm2 = provider.provision("v2", "t", "r", "i", "k", labels={"hermes-sandbox": "true"})
+    # vm1 is known, vm2 is a stray.
+    destroyed = mgr.cleanup_strays({vm1.id})
+    assert vm2.id in destroyed
+    assert vm1.id not in destroyed
+    # vm1 survives, vm2 is gone.
+    assert provider.get(vm1.id)
+    with pytest.raises(KeyError):
+        provider.get(vm2.id)
+
+
 def test_sandboxstatus_is_frozen():
     """SandboxStatus is an immutable value object."""
     import dataclasses

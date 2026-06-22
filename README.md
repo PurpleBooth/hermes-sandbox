@@ -146,6 +146,7 @@ Inside a Hermes session, use the slash command:
     /sandbox teardown     # destroy the VM
     /sandbox list         # list all sandbox VMs on the cloud
     /sandbox recreate     # destroy the current VM and provision a fresh one
+    /sandbox cleanup      # tear down stray VMs not tracked by any session
     /sandbox enable       # set terminal.backend=ssh
 
 From the shell:

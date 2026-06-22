@@ -190,6 +190,21 @@ def test_slash_help_advertises_recreate():
     assert "recreate" in out
 
 
+def test_slash_cleanup_no_strays(tmp_path, fake_key_factory, monkeypatch):
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    mgr.ensure_vm()
+    out = hermes_sandbox._handle_slash("cleanup")
+    assert out is not None
+    assert "No stray VMs found" in out
+
+
+def test_slash_help_advertises_cleanup():
+    out = hermes_sandbox._handle_slash("help")
+    assert out is not None
+    assert "cleanup" in out
+
+
 def test_slash_status_none_when_no_manager(monkeypatch):
     out = hermes_sandbox._handle_slash("status")
     assert "Not configured" in out

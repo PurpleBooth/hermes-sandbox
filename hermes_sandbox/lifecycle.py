@@ -261,3 +261,23 @@ class VMLifecycleManager:
         if self.config.auto_teardown_seconds <= 0:
             return False
         return self.teardown()
+
+    def cleanup_strays(self, known_vm_ids: set[str]) -> list[str]:
+        """Tear down cloud VMs not in ``known_vm_ids`` (stray VMs).
+
+        Lists all VMs tagged ``hermes-sandbox`` on the cloud and destroys any
+        whose ID is not in the provided set.  The caller collects known IDs
+        from local state files and in-memory session tracking.  Returns the
+        list of destroyed VM IDs.
+        """
+        cloud_vms = self.list_vms()
+        destroyed: list[str] = []
+        for vm in cloud_vms:
+            if vm.id not in known_vm_ids:
+                try:
+                    self.provider.teardown(vm.id)
+                    destroyed.append(vm.id)
+                    logger.info("sandbox: cleaned up stray VM %s", vm.id)
+                except Exception as exc:
+                    logger.warning("sandbox: could not tear down stray VM %s: %s", vm.id, exc)
+        return destroyed
