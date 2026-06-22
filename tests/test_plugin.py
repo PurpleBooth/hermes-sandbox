@@ -6,13 +6,13 @@ import pytest
 
 import vm_sandbox
 from vm_sandbox.config import SandboxConfig
+from vm_sandbox.dry_run import DryRunProvider
 from vm_sandbox.lifecycle import VMLifecycleManager
-from vm_sandbox.provider import FakeProvider
 
 
 def _make_manager(tmp_path, fake_key_factory):
-    provider = FakeProvider()
-    config = SandboxConfig(provider_name="fake", token="", ssh_user="root")
+    provider = DryRunProvider()
+    config = SandboxConfig(provider_name="dry-run", token="", ssh_user="root")
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
     return VMLifecycleManager(
@@ -67,8 +67,8 @@ def test_on_session_start_failopen_on_provision_error(tmp_path, fake_key_factory
 
 
 def test_on_session_end_teardowns_when_auto(tmp_path, fake_key_factory, monkeypatch):
-    provider = FakeProvider()
-    config = SandboxConfig(provider_name="fake", token="", ssh_user="root",
+    provider = DryRunProvider()
+    config = SandboxConfig(provider_name="dry-run", token="", ssh_user="root",
                            auto_teardown_seconds=30)
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()

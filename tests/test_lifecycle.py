@@ -6,14 +6,14 @@ import time
 import pytest
 
 from vm_sandbox.config import SandboxConfig
+from vm_sandbox.dry_run import DryRunProvider
 from vm_sandbox.lifecycle import VMLifecycleManager
-from vm_sandbox.provider import FakeProvider
 
 
 def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None,
                  clock=None):
-    provider = provider or FakeProvider()
-    config = config or SandboxConfig(provider_name="fake", token="", ssh_user="root")
+    provider = provider or DryRunProvider()
+    config = config or SandboxConfig(provider_name="dry-run", token="", ssh_user="root")
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir(exist_ok=True)
     return VMLifecycleManager(
@@ -62,8 +62,8 @@ def test_config_not_configured_without_token():
     assert not cfg.is_configured()
 
 
-def test_config_fake_is_configured_without_token():
-    assert SandboxConfig(provider_name="fake", token="").is_configured()
+def test_config_dry_run_is_configured_without_token():
+    assert SandboxConfig(provider_name="dry-run", token="").is_configured()
 
 
 def test_ensure_vm_provisions_and_records_state(tmp_path, fake_key_factory):
@@ -77,12 +77,12 @@ def test_ensure_vm_provisions_and_records_state(tmp_path, fake_key_factory):
 
 
 def test_ensure_vm_reuses_existing(tmp_path, fake_key_factory):
-    provider = FakeProvider()
+    provider = DryRunProvider()
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
     first = mgr.ensure_vm()
     second = mgr.ensure_vm()
     assert first.id == second.id
-    # FakeProvider records calls; provision should only have fired once.
+    # DryRunProvider records calls; provision should only have fired once.
     provisions = [c for c in provider.calls if c["op"] == "provision"]
     assert len(provisions) == 1
 
@@ -90,7 +90,7 @@ def test_ensure_vm_reuses_existing(tmp_path, fake_key_factory):
 def test_ensure_vm_reprovisions_when_dead(tmp_path, fake_key_factory):
     import dataclasses
 
-    provider = FakeProvider()
+    provider = DryRunProvider()
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
     first = mgr.ensure_vm()
     # Kill it on the provider side (VMInstance is frozen — replace, don't mutate).
@@ -102,7 +102,7 @@ def test_ensure_vm_reprovisions_when_dead(tmp_path, fake_key_factory):
 
 
 def test_ensure_vm_reprovisions_when_provider_forgets(tmp_path, fake_key_factory):
-    provider = FakeProvider()
+    provider = DryRunProvider()
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
     first = mgr.ensure_vm()
     # Simulate the VM vanishing from the provider entirely.
@@ -112,7 +112,7 @@ def test_ensure_vm_reprovisions_when_provider_forgets(tmp_path, fake_key_factory
 
 
 def test_teardown_clears_state(tmp_path, fake_key_factory):
-    provider = FakeProvider()
+    provider = DryRunProvider()
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
     mgr.ensure_vm()
     assert mgr.state_path.exists()
@@ -124,15 +124,15 @@ def test_teardown_clears_state(tmp_path, fake_key_factory):
 
 def test_maybe_auto_teardown_respects_config(tmp_path, fake_key_factory):
     # auto_teardown_seconds=0 -> never.
-    provider = FakeProvider()
+    provider = DryRunProvider()
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
     mgr.ensure_vm()
     assert mgr.maybe_auto_teardown() is False
     assert mgr.state_path.exists()
 
     # >0 -> tears down.
-    provider2 = FakeProvider()
-    cfg = SandboxConfig(provider_name="fake", token="", ssh_user="root",
+    provider2 = DryRunProvider()
+    cfg = SandboxConfig(provider_name="dry-run", token="", ssh_user="root",
                         auto_teardown_seconds=60)
     mgr2 = make_manager(tmp_path, provider=provider2, config=cfg,
                         fake_key_factory=fake_key_factory)
@@ -144,7 +144,7 @@ def test_maybe_auto_teardown_respects_config(tmp_path, fake_key_factory):
 def test_state_records_ipv6_and_ssh_host(tmp_path, fake_key_factory):
     import dataclasses
 
-    provider = FakeProvider()
+    provider = DryRunProvider()
     # Make provision return a VM with IPv6.
     orig_provision = provider.provision
 
@@ -178,7 +178,7 @@ def test_status_returns_none_without_state(tmp_path, fake_key_factory):
 
 
 def test_load_state_returns_none_on_corrupt_json(tmp_path):
-    from vm_sandbox.lifecycle import JsonStateRepository
+    from vm_sandbox.state import JsonStateRepository
 
     repo = JsonStateRepository(tmp_path)
     repo.path.write_text("{not valid json")
@@ -186,7 +186,7 @@ def test_load_state_returns_none_on_corrupt_json(tmp_path):
 
 
 def test_load_state_returns_none_on_non_dict_json(tmp_path):
-    from vm_sandbox.lifecycle import JsonStateRepository
+    from vm_sandbox.state import JsonStateRepository
 
     repo = JsonStateRepository(tmp_path)
     repo.path.write_text("[1, 2, 3]")
@@ -194,7 +194,7 @@ def test_load_state_returns_none_on_non_dict_json(tmp_path):
 
 
 def test_load_state_returns_none_on_unreadable_path(tmp_path):
-    from vm_sandbox.lifecycle import JsonStateRepository
+    from vm_sandbox.state import JsonStateRepository
 
     repo = JsonStateRepository(tmp_path)
     # Point the backing path at a directory — read_text() raises IsADirectoryError (OSError).
@@ -204,13 +204,13 @@ def test_load_state_returns_none_on_unreadable_path(tmp_path):
 
 def test_state_repository_roundtrip(tmp_path):
     """save() then load() returns an equal SandboxState (typed persistence)."""
-    from vm_sandbox.lifecycle import JsonStateRepository, SandboxState
+    from vm_sandbox.state import JsonStateRepository, SandboxState
 
     repo = JsonStateRepository(tmp_path)
     assert repo.load() is None  # nothing yet
 
     state = SandboxState(
-        vm_id="1", provider="fake", name="n", region="r", public_ip="1.2.3.4",
+        vm_id="1", provider="dry-run", name="n", region="r", public_ip="1.2.3.4",
         public_ipv6="", ssh_host="1.2.3.4", ssh_user="root",
         created_at=1.0, last_used=2.0,
     )
@@ -224,7 +224,7 @@ def test_state_repository_roundtrip(tmp_path):
 def test_manager_accepts_injected_state_repo(tmp_path, fake_key_factory):
     """The manager depends on the StateRepository Protocol, not the filesystem:
     an in-memory repo lets the use-case run without any file I/O."""
-    from vm_sandbox.lifecycle import SandboxState
+    from vm_sandbox.state import SandboxState
 
     class InMemoryRepo:
         def __init__(self) -> None:
@@ -241,8 +241,8 @@ def test_manager_accepts_injected_state_repo(tmp_path, fake_key_factory):
         def clear(self) -> None:
             self._state = None
 
-    provider = FakeProvider()
-    config = SandboxConfig(provider_name="fake", token="", ssh_user="root")
+    provider = DryRunProvider()
+    config = SandboxConfig(provider_name="dry-run", token="", ssh_user="root")
     mgr = VMLifecycleManager(
         provider=provider, config=config, hermes_home=tmp_path / ".hermes",
         key_factory=fake_key_factory, state_repo=InMemoryRepo(),
@@ -278,19 +278,19 @@ def test_status_returns_sandboxstatus_value_object(tmp_path, fake_key_factory):
     st = mgr.status()
     assert isinstance(st, SandboxStatus)
     assert st.vm_id
-    assert st.provider == "fake"
+    assert st.provider == "dry-run"
     assert st.public_ip
     assert st.alive is True
     assert st.live_status == "running"
     # Round-trips to a dict carrying the keys the specdown status grep checks.
     d = st.to_dict()
     assert d["vm_id"] == st.vm_id
-    assert d["provider"] == "fake"
+    assert d["provider"] == "dry-run"
     assert d["public_ip"] == st.public_ip
 
 
 def test_status_marks_dead_when_provider_forgets(tmp_path, fake_key_factory):
-    provider = FakeProvider()
+    provider = DryRunProvider()
     mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
     mgr.ensure_vm()
     del provider._vms[mgr.status().vm_id]  # type: ignore[union-attr]
@@ -307,7 +307,7 @@ def test_sandboxstatus_is_frozen():
     from vm_sandbox.lifecycle import SandboxStatus
 
     st = SandboxStatus(
-        vm_id="1", provider="fake", name="n", region="r", public_ip="1.2.3.4",
+        vm_id="1", provider="dry-run", name="n", region="r", public_ip="1.2.3.4",
         public_ipv6="", ssh_host="1.2.3.4", ssh_user="root",
         created_at=0.0, last_used=0.0, alive=True,
     )

@@ -25,10 +25,10 @@ export HERMES_HOME="$TEMPORARY_HOME"
 hermes plugins enable vm-sandbox >/dev/null
 hermes config set terminal.backend ssh >/dev/null
 
-# Build the spec file list.  The fake provider and reference specs always
+# Build the spec file list.  The dry-run provider and reference specs always
 # run.  The Hetzner and DigitalOcean task specs only run when their tokens
 # are available — otherwise they'd fail on the provision step.
-SPECS=(docs/references/*.md docs/tasks/fake-provider.md)
+SPECS=(docs/references/*.md docs/tasks/dry-run-provider.md)
 
 if [ -n "${HCLOUD_TOKEN:-}" ]; then
 	SPECS+=(docs/tasks/hetzner-provider.md)

@@ -88,8 +88,8 @@ def _do_request(
 
 def _make_provider(name: str) -> CloudProvider:
     """Build a provider instance with fake HTTP where needed."""
-    if name == "fake":
-        return get_provider("fake", token="")
+    if name == "dry-run":
+        return get_provider("dry-run", token="")
     if name == "hetzner":
         from vm_sandbox.hetzner import HetznerProvider
 

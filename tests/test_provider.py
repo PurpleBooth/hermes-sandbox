@@ -7,7 +7,6 @@ import pytest
 from vm_sandbox.models import VMInstance
 from vm_sandbox.provider import (
     CloudProvider,
-    FakeProvider,
     available_providers,
     get_provider,
     register_provider,
@@ -63,9 +62,9 @@ def test_vminstance_roundtrip():
     assert restored.extra["foo"] == "bar"
 
 
-def test_registry_has_fake_hetzner_digitalocean():
+def test_registry_has_dry_run_hetzner_digitalocean():
     names = available_providers()
-    assert "fake" in names
+    assert "dry-run" in names
     # hetzner + digitalocean register on import of their modules.
     import vm_sandbox.digitalocean  # noqa: F401
     import vm_sandbox.hetzner  # noqa: F401
@@ -89,11 +88,14 @@ def test_register_provider_requires_name():
             def list_by_label(self, k, v): return []
 
 
-def test_fake_provider_provision_get_teardown():
-    p = get_provider("fake")
+def test_dry_run_provider_provision_get_teardown():
+    from vm_sandbox.dry_run import DryRunProvider
+
+    p = DryRunProvider()
     vm = p.provision("v", "t", "r", "img", "ssh-key", labels={"x": "y"})
     assert vm.is_running()
     assert vm.public_ip
+    assert vm.id == "dry-run-1"
     assert p.get(vm.id).id == vm.id
     assert p.list_by_label("x", "y") == [vm]
     p.teardown(vm.id)

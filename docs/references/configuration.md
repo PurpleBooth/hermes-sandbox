@@ -8,9 +8,9 @@ them in your shell.
 
 | Variable | Default | Values |
 |---|---|---|
-| `VM_SANDBOX_PROVIDER` | `hetzner` | `hetzner` \| `digitalocean` \| `fake` |
+| `VM_SANDBOX_PROVIDER` | `hetzner` | `hetzner` \| `digitalocean` \| `dry-run` |
 
-The `fake` provider is for testing — it provisions an in-memory VM and
+The `dry-run` provider is for testing — it provisions an in-memory VM and
 requires no token.
 
 ## Cloud credentials
@@ -22,12 +22,12 @@ requires no token.
 | `DIGITALOCEAN_TOKEN` | digitalocean | DigitalOcean API token |
 | `DO_API_TOKEN` | digitalocean | Alias for `DIGITALOCEAN_TOKEN` |
 
-Only real providers require a token.  The `fake` provider is always
+Only real providers require a token.  The `dry-run` provider is always
 configured.
 
 ## VM settings
 
-| Variable | Default (hetzner) | Default (digitalocean) | Default (fake) |
+| Variable | Default (hetzner) | Default (digitalocean) | Default (dry-run) |
 |---|---|---|---|
 | `VM_SANDBOX_INSTANCE_TYPE` | `cx23` | `s-2vcpu-4gb` | `cx23` |
 | `VM_SANDBOX_REGION` | `nbg1` | `fra1` | `nbg1` |
@@ -51,13 +51,13 @@ so a VM created in a previous session is reused.  The SSH keypair lives at
 ## Verifying configuration
 
 A provider is "configured" when it has a token, or when the provider is
-`fake`.  You can check by running `hermes vm-sandbox status`:
+`dry-run`.  You can check by running `hermes vm-sandbox status`:
 
-```shell,script(name="fake-configured", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=fake hermes vm-sandbox status
+```shell,script(name="dry-run-configured", expected_exit_code=0)
+VM_SANDBOX_PROVIDER=dry-run hermes vm-sandbox status
 ```
 
-```text,verify(script_name="fake-configured", stream=stdout)
+```text,verify(script_name="dry-run-configured", stream=stdout)
 [vm-sandbox] No sandbox VM recorded.
 ```
 
