@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 from .models import ApiError, VMInstance
 from .provider import RestCloudProvider, poll_until, register_provider
@@ -79,13 +80,13 @@ class HetznerProvider(RestCloudProvider):
     default_instance_type = "cx23"
 
     def _delete_path(self, vm_id: str) -> str:
+        """Return the REST path for deleting a server by id."""
         return f"/servers/{vm_id}"
 
     # -- helpers -----------------------------------------------------------
 
     def _ensure_ssh_key(self, public_key: str, name: str = "hermes-sandbox") -> str:
         """Upload the public key (idempotent) and return its name."""
-        # Try to find an existing key with this name or fingerprint.
         try:
             listing = self._request("GET", "/ssh_keys", self.token)
         except ApiError:
@@ -113,6 +114,7 @@ class HetznerProvider(RestCloudProvider):
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
     ) -> VMInstance:
+        """Create a server and block until it has a public IPv4."""
         labels = labels or {}
         labels.setdefault(_DEFAULT_LABEL_KEY, _DEFAULT_LABEL_VALUE)
         key_name = self._ensure_ssh_key(ssh_public_key)
@@ -150,11 +152,12 @@ class HetznerProvider(RestCloudProvider):
         return vm
 
     def get(self, vm_id: str) -> VMInstance:
+        """Return the current description of a server by id."""
         resp = self._request("GET", f"/servers/{vm_id}", self.token)
         return _to_vm(resp.get("server", {}))
 
     def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
-        resp = self._request(
-            "GET", f"/servers?label_selector={label_key}={label_value}", self.token
-        )
+        """List servers whose ``label_selector`` matches ``label_key=label_value``."""
+        path = "/servers?" + urlencode({"label_selector": f"{label_key}={label_value}"})
+        resp = self._request("GET", path, self.token)
         return [_to_vm(s) for s in resp.get("servers", [])]

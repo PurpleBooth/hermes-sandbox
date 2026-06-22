@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import urllib.parse
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -69,7 +70,7 @@ def _make_hz_request() -> RequestFn:
             servers.pop(vm_id, None)
             return {}
         if method == "GET" and "label_selector=" in path:
-            selector = path.split("label_selector=", 1)[1]
+            selector = urllib.parse.unquote(path.split("label_selector=", 1)[1])
             key, val = selector.split("=", 1)
             matching = [s for s in servers.values() if s.get("labels", {}).get(key) == val]
             return {"servers": matching}
@@ -150,8 +151,9 @@ def _make_provider(name: str) -> CloudProvider:
 
         # Use the real subprocess runner — QEMU is a local provider, not a
         # cloud API.  Tests that actually provision will be skipped if QEMU
-        # or an ISO builder (xorriso/genisoimage) isn't installed.
-        return QemuProvider(token="")
+        # or an ISO builder (xorriso/genisoimage) isn't installed.  A fresh
+        # work_dir per instance isolates the persisted ``vm.json`` metadata.
+        return QemuProvider(token="", work_dir=Path(tempfile.mkdtemp(prefix="qemu-contract-")))
     if name == "hetzner":
         from hermes_sandbox.hetzner import HetznerProvider
 
@@ -193,8 +195,10 @@ _provision_providers = [n for n in _PROVIDERS if n != "qemu" or _qemu_available(
 def test_provider_is_registered_and_instantiable(name: str):
     """Every provider can be built via get_provider(name, token=...)."""
     p = _make_provider(name)
-    assert isinstance(p, CloudProvider)
-    assert p.name == name
+    assert isinstance(p, CloudProvider), (
+        f"{name}: must be a CloudProvider instance, got {type(p)!r}"
+    )
+    assert p.name == name, f"{name}: provider.name must match, got {p.name!r}"
 
 
 @pytest.mark.parametrize("name", _PROVIDERS)
@@ -224,12 +228,13 @@ def test_provider_resolve_token_picks_first_non_empty(name: str):
 
     cls = get_provider_class(name)
     primary = cls.token_env_keys[0]
-    # Only the primary key set → that value is returned.
-    assert cls.resolve_token({primary: "secret-123"}) == "secret-123"
-    # Nothing set → empty string.
-    assert cls.resolve_token({}) == ""
-    # SANDBOX_TOKEN fallback works when the primary isn't set.
-    assert cls.resolve_token({"SANDBOX_TOKEN": "fallback"}) == "fallback"
+    assert cls.resolve_token({primary: "secret-123"}) == "secret-123", (
+        f"{name}: resolve_token with only the primary key set must return its value"
+    )
+    assert cls.resolve_token({}) == "", f"{name}: resolve_token with nothing set must return ''"
+    assert cls.resolve_token({"SANDBOX_TOKEN": "fallback"}) == "fallback", (
+        f"{name}: SANDBOX_TOKEN fallback must work when the primary key is unset"
+    )
 
 
 # ── Contract: provision returns a valid running VM ──────────────────────────
@@ -332,7 +337,9 @@ def test_provisioned_vm_prefers_ipv6_when_available(name: str, contract_image):
     )
     # hetzner and digitalocean fakes both return IPv6; dry-run/qemu do not.
     if vm.public_ipv6:
-        assert vm.preferred_ip() == vm.public_ipv6
+        assert vm.preferred_ip() == vm.public_ipv6, (
+            f"{name}: preferred_ip must use IPv6 when available, got {vm.preferred_ip()!r}"
+        )
 
 
 # ── Contract: get returns the same VM ───────────────────────────────────────

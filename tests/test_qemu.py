@@ -82,8 +82,9 @@ def test_qemu_provision_starts_vm_and_returns_running_instance():
     assert lo <= vm.extra["ssh_port"] <= hi, (
         f"expected kernel ephemeral port in [{lo}, {hi}], got {vm.extra['ssh_port']}"
     )
-    # The runner was called twice: once for genisoimage, once for qemu-system.
-    assert len(runner.calls) == 2
+    # The runner is called three times: qemu-img (overlay), genisoimage (seed
+    # ISO), and qemu-system-x86_64 (the VM).
+    assert len(runner.calls) == 3, f"expected 3 runner calls, got {len(runner.calls)}"
     qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]]
     assert len(qemu_cmd) == 1
     assert "-daemonize" in qemu_cmd[0]
@@ -160,8 +161,8 @@ def test_qemu_teardown_missing_is_noop():
     p.teardown("nonexistent")
 
 
-def test_qemu_list_by_label_finds_provisioned_vm():
-    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage")
+def test_qemu_list_by_label_finds_provisioned_vm(tmp_path):
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
     p.provision(
         "v",
         "2cpu-2gb",
@@ -171,22 +172,26 @@ def test_qemu_list_by_label_finds_provisioned_vm():
         labels={"hermes-sandbox": "true"},
     )
     found = p.list_by_label("hermes-sandbox", "true")
-    assert len(found) == 1
-    assert found[0].provider == "qemu"
+    assert len(found) == 1, f"expected exactly one matching VM, got {len(found)}"
+    assert found[0].provider == "qemu", f"expected provider qemu, got {found[0].provider!r}"
 
 
-def test_qemu_list_by_label_empty_when_no_match():
-    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage")
-    assert p.list_by_label("hermes-sandbox", "true") == []
+def test_qemu_list_by_label_empty_when_no_match(tmp_path):
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
+    assert p.list_by_label("hermes-sandbox", "true") == [], (
+        "list_by_label must be empty when no VM matches the label"
+    )
 
 
-def test_qemu_provision_includes_image_in_command():
+def test_qemu_provision_includes_image_in_command(tmp_path):
     runner = _fake_runner()
-    p = QemuProvider(runner=runner, iso_bin="genisoimage")
+    p = QemuProvider(runner=runner, iso_bin="genisoimage", work_dir=tmp_path)
     p.provision("v", "2cpu-2gb", "local", "/data/ubuntu.qcow2", "k")
-    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
-    drive_args = [a for a in qemu_cmd if "/data/ubuntu.qcow2" in a]
-    assert drive_args, "qcow2 image path must be in the QEMU command"
+    qemu_img_cmd = [c for c in runner.calls if c[0] == "qemu-img"]
+    assert len(qemu_img_cmd) == 1, "provision must run qemu-img to create the overlay"
+    assert "/data/ubuntu.qcow2" in qemu_img_cmd[0], (
+        "base image must be the qcow2 backing file (-b) in the qemu-img command"
+    )
 
 
 def test_qemu_provision_builds_cloud_init_seed_iso():
@@ -484,3 +489,96 @@ def test_default_downloader_downloads_file_url(tmp_path):
     dest = tmp_path / "out" / "downloaded.img"
     _default_downloader(src.as_uri(), dest)
     assert dest.read_bytes() == b"image-bytes", "downloaded content must match source"
+
+
+# ── QCOW2 overlay (Bug 1: base-image corruption) ─────────────────────────────
+
+
+def test_qemu_provision_creates_qcow2_overlay_backed_by_base_image(tmp_path):
+    """provision() must create a per-VM qcow2 overlay backed by the base image
+    and use the OVERLAY as the drive file — never the shared cached base image
+    (which would be corrupted when two VMs share the same default URL).
+    """
+    runner = _fake_runner()
+    local_base = tmp_path / "base.qcow2"
+    local_base.write_bytes(b"base image")
+    p = QemuProvider(runner=runner, iso_bin="genisoimage", work_dir=tmp_path)
+    p.provision("v", "2cpu-2gb", "local", str(local_base), "k")
+
+    img_cmds = [c for c in runner.calls if c[:2] == ["qemu-img", "create"]]
+    assert len(img_cmds) == 1, f"expected one qemu-img create call, got {len(img_cmds)}"
+    img_cmd = img_cmds[0]
+    assert "-b" in img_cmd, "overlay must declare a backing file (-b)"
+    backing = img_cmd[img_cmd.index("-b") + 1]
+    assert backing == str(local_base), f"backing file must be the base image, got {backing!r}"
+    assert "-F" in img_cmd, "overlay must declare backing format (-F qcow2)"
+    fmt = img_cmd[img_cmd.index("-F") + 1]
+    assert fmt == "qcow2", f"backing format must be qcow2, got {fmt!r}"
+    overlay_path = img_cmd[-1]
+    assert overlay_path == str(tmp_path / "v" / "disk.qcow2"), (
+        f"overlay must be at work_dir/<name>/disk.qcow2, got {overlay_path!r}"
+    )
+
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
+    drive_args = [a for a in qemu_cmd if "file=" in a]
+    assert any(f"file={overlay_path}" in a for a in drive_args), (
+        f"QEMU drive must use the overlay {overlay_path!r}"
+    )
+    assert not any(str(local_base) in a for a in drive_args), (
+        "QEMU drive must NOT reference the shared base image directly"
+    )
+
+
+# ── Cross-process get()/list_by_label() (Bug 2) ──────────────────────────────
+
+
+def test_qemu_get_works_across_separate_processes(tmp_path):
+    """get() must read vm.json from disk so a SEPARATE process (a new provider
+    instance sharing the same work_dir) can look up a VM it never provisioned
+    in-memory.  Without this, the lifecycle manager re-provisions and orphans
+    the running QEMU process.
+    """
+    p1 = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
+    vm = p1.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k", labels={"env": "test"})
+
+    p2 = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
+    fetched = p2.get(vm.id)
+    assert fetched.id == vm.id, f"expected id={vm.id!r}, got {fetched.id!r}"
+    assert fetched.name == vm.name, f"expected name={vm.name!r}, got {fetched.name!r}"
+    assert fetched.provider == "qemu", f"expected provider='qemu', got {fetched.provider!r}"
+
+
+def test_qemu_list_by_label_works_across_separate_processes(tmp_path):
+    """list_by_label() must scan vm.json files on disk so a separate process
+    can discover VMs created by another process.
+    """
+    p1 = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
+    p1.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k", labels={"env": "prod"})
+
+    p2 = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
+    found = p2.list_by_label("env", "prod")
+    assert len(found) == 1, f"expected 1 VM with env=prod, got {len(found)}"
+    assert found[0].id == "v", f"expected VM id 'v', got {found[0].id!r}"
+
+
+# ── KVM acceleration (Bug 3) ─────────────────────────────────────────────────
+
+
+def test_qemu_provision_enables_kvm_by_default():
+    """By default provision() launches QEMU with -enable-kvm for hardware
+    acceleration (TCG software emulation is 10–50× slower).
+    """
+    runner = _fake_runner()
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
+    p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k")
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
+    assert "-enable-kvm" in qemu_cmd, "default provision must enable KVM acceleration"
+
+
+def test_qemu_provision_can_disable_kvm():
+    """When enable_kvm=False, the -enable-kvm flag is omitted (TCG fallback)."""
+    runner = _fake_runner()
+    p = QemuProvider(runner=runner, iso_bin="genisoimage", enable_kvm=False)
+    p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k")
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
+    assert "-enable-kvm" not in qemu_cmd, "enable_kvm=False must not pass -enable-kvm to QEMU"
