@@ -16,13 +16,8 @@ import logging
 from dataclasses import replace
 from typing import Any
 
-from .provider import (
-    ApiError,
-    RestCloudProvider,
-    VMInstance,
-    poll_until,
-    register_provider,
-)
+from .models import ApiError, VMInstance
+from .provider import RestCloudProvider, poll_until, register_provider
 
 logger = logging.getLogger(__name__)
 

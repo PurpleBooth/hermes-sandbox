@@ -4,10 +4,10 @@ import dataclasses
 
 import pytest
 
+from vm_sandbox.models import VMInstance
 from vm_sandbox.provider import (
     CloudProvider,
     FakeProvider,
-    VMInstance,
     available_providers,
     get_provider,
     register_provider,

@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from .provider import VMInstance
+from .models import VMInstance
 from .ssh_util import restrict_to_owner
 
 logger = logging.getLogger(__name__)

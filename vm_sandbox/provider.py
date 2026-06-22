@@ -8,6 +8,9 @@ registered via :func:`register_provider` and instantiated by name through
 The interface is deliberately minimal: provision a VM (injecting an SSH
 public key), describe it, tear it down, and list VMs carrying a given
 label so the lifecycle manager can find a previously-created sandbox.
+
+Domain value objects (:class:`~vm_sandbox.models.VMInstance`,
+:class:`~vm_sandbox.models.ApiError`) live in :mod:`vm_sandbox.models`.
 """
 
 from __future__ import annotations
@@ -19,74 +22,13 @@ import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from .models import ApiError, VMInstance
 
 # Signature of the injectable HTTP request function used by REST providers.
 # (method, path, token, body, timeout) -> parsed JSON dict.
 RequestFn = Callable[..., dict[str, Any]]
-
-
-class ApiError(RuntimeError):
-    """A structured REST API failure.
-
-    Raised by REST providers' ``_request`` when the cloud API returns a non-2xx
-    status.  Carries the HTTP status code so callers (e.g. teardown idempotency)
-    can branch on it without parsing the error message string.  Subclasses
-    :class:`RuntimeError` so existing ``except RuntimeError`` sites still catch
-    it.
-    """
-
-    def __init__(self, method: str, path: str, status_code: int, detail: str = "") -> None:
-        self.method = method
-        self.path = path
-        self.status_code = status_code
-        self.detail = detail
-        super().__init__(
-            f"{method} {path} failed: HTTP {status_code}"
-            + (f" {detail}" if detail else "")
-        )
-
-
-@dataclass(frozen=True)
-class VMInstance:
-    """A provider-agnostic description of a running (or provisioning) VM."""
-
-    id: str
-    name: str
-    status: str  # provider-native status string; normalised via is_running()
-    public_ip: str
-    region: str
-    provider: str
-    public_ipv6: str = ""
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    # Statuses that mean "reachable over SSH".  "running" (Hetzner) and
-    # "active" (DigitalOcean) are the two provider-native "up" states.
-    _RUNNING_STATUSES = frozenset({"running", "active"})
-
-    def is_running(self) -> bool:
-        return self.status.lower() in self._RUNNING_STATUSES
-
-    def preferred_ip(self) -> str:
-        """Return the SSH target address — IPv6 preferred, IPv4 fallback."""
-        return self.public_ipv6 or self.public_ip
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> VMInstance:
-        """Reconstruct a VMInstance from a ``to_dict()`` payload.
-
-        Unknown keys are ignored (defensive against extra fields in the dict),
-        not folded into ``extra`` — ``extra`` is restored only from the
-        ``extra`` key.
-        """
-        known = set(cls.__dataclass_fields__)
-        kwargs = {k: v for k, v in data.items() if k in known and k != "extra"}
-        extra = data.get("extra") or {}
-        return cls(extra=extra, **kwargs)
 
 
 class CloudProvider(ABC):
@@ -146,9 +88,38 @@ class CloudProvider(ABC):
         """Return VMs carrying ``label_key=label_value``."""
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+# Functional helpers
+# --------------------------------------------------------------------------- #
+
+
+def poll_until(
+    predicate: Callable[[], bool],
+    *,
+    interval: float,
+    timeout: float,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Call ``predicate`` until it returns True, sleeping ``interval`` between tries.
+
+    Raises ``TimeoutError`` if ``predicate`` is still falsy after ``timeout``
+    seconds.  ``sleep`` and ``clock`` are injectable so the poll loop can be
+    exercised in tests without real waiting.  The predicate is always called at
+    least once before sleeping.
+    """
+    deadline = clock() + timeout
+    while True:
+        if predicate():
+            return
+        if clock() >= deadline:
+            raise TimeoutError(f"poll_until: condition not met within {timeout}s")
+        sleep(interval)
+
+
+# --------------------------------------------------------------------------- #
+# Provider registry
+# --------------------------------------------------------------------------- #
 
 _REGISTRY: dict[str, type[CloudProvider]] = {}
 
@@ -178,35 +149,6 @@ def get_provider_class(name: str) -> type[CloudProvider]:
 
 def available_providers() -> list[str]:
     return sorted(_REGISTRY)
-
-
-# --------------------------------------------------------------------------- #
-# Functional helpers
-# --------------------------------------------------------------------------- #
-
-
-def poll_until(
-    predicate: Callable[[], bool],
-    *,
-    interval: float,
-    timeout: float,
-    sleep: Callable[[float], None] = time.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> None:
-    """Call ``predicate`` until it returns True, sleeping ``interval`` between tries.
-
-    Raises ``TimeoutError`` if ``predicate`` is still falsy after ``timeout``
-    seconds.  ``sleep`` and ``clock`` are injectable so the poll loop can be
-    exercised in tests without real waiting.  The predicate is always called at
-    least once before sleeping.
-    """
-    deadline = clock() + timeout
-    while True:
-        if predicate():
-            return
-        if clock() >= deadline:
-            raise TimeoutError(f"poll_until: condition not met within {timeout}s")
-        sleep(interval)
 
 
 # --------------------------------------------------------------------------- #
@@ -300,9 +242,9 @@ class RestCloudProvider(CloudProvider):
             raise
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
 # A fake provider used by tests and as a structural reference.
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
 
 
 @register_provider

@@ -59,7 +59,7 @@ def test_hetzner_provision_polls_for_ip():
 
 
 def test_hetzner_teardown_404_is_success():
-    from vm_sandbox.provider import ApiError
+    from vm_sandbox.models import ApiError
 
     def fake_request(method, path, token, body=None, timeout=30):
         raise ApiError("GET", path, status_code=404, detail="not found")
@@ -69,7 +69,7 @@ def test_hetzner_teardown_404_is_success():
 
 
 def test_hetzner_teardown_500_raises_api_error():
-    from vm_sandbox.provider import ApiError
+    from vm_sandbox.models import ApiError
 
     def fake_request(method, path, token, body=None, timeout=30):
         raise ApiError("DELETE", path, status_code=500, detail="boom")
@@ -83,7 +83,7 @@ def test_hetzner_teardown_500_raises_api_error():
 def test_api_error_is_a_runtime_error_subclass():
     """ApiError subclasses RuntimeError so existing 'except RuntimeError' callers
     that don't check status_code still catch it (backwards-compatible)."""
-    from vm_sandbox.provider import ApiError
+    from vm_sandbox.models import ApiError
 
     assert issubclass(ApiError, RuntimeError)
 
@@ -152,7 +152,7 @@ def test_do_provision_polls_until_active():
 
 
 def test_do_teardown_404_is_success():
-    from vm_sandbox.provider import ApiError
+    from vm_sandbox.models import ApiError
 
     def fake_request(method, path, token, body=None, timeout=30):
         raise ApiError("DELETE", path, status_code=404, detail="not found")
