@@ -1,7 +1,7 @@
 """Contract tests — every registered provider must satisfy the same lifecycle.
 
-These tests run the same suite of assertions against each provider (fake,
-hetzner, digitalocean) so that adding a new provider automatically inherits
+These tests run the same suite of assertions against each provider (dry-run,
+hetzner, digitalocean) so that adding a provider automatically inherits
 the full contract.  Real cloud providers are exercised with injected fake
 HTTP (``request_fn``) — no network calls are made.
 """

@@ -50,7 +50,7 @@ fi
 # Forward HERMES_HOME and any cloud tokens to every script block.
 # Unset VM_SANDBOX_PROVIDER so specs that test the "not configured" state
 # don't pick up a stale value from the caller's environment — specs that
-# need it set it inline (e.g. VM_SANDBOX_PROVIDER=fake hermes vm-sandbox ...).
+# need it set it inline (e.g. VM_SANDBOX_PROVIDER=dry-run hermes vm-sandbox ...).
 ENV_ARGS=(
 	--env "HERMES_HOME=$TEMPORARY_HOME"
 	--unset-env VM_SANDBOX_PROVIDER
