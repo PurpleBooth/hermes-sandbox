@@ -55,6 +55,7 @@ SANDBOX_IMAGE=ubuntu-24.04            # provider-specific
 SANDBOX_SSH_USER=root                 # default root (cloud images)
 SANDBOX_NAME=hermes-sandbox           # VM name
 SANDBOX_AUTO_TEARDOWN_SECONDS=0       # 0 = keep across sessions; >0 = teardown on session end
+SANDBOX_MODE=shared                   # shared = one VM for all sessions; isolated = one VM per session
 ```
 
 Restart Hermes after first configuration.
@@ -67,6 +68,8 @@ In a session:
 /sandbox status       # show the current sandbox VM
 /sandbox provision    # provision/reuse now
 /sandbox teardown     # destroy the VM
+/sandbox list         # list all sandbox VMs on the cloud
+/sandbox recreate     # destroy the current VM and provision a fresh one
 /sandbox enable       # set terminal.backend=ssh
 ```
 
