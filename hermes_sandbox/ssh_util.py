@@ -13,8 +13,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class KeyPair:
+    """An SSH keypair on disk, ready to inject into a provisioned VM."""
+
     private_path: str
     public_path: str
     public_key: str  # full "ssh-ed25519 AAAA... comment" string

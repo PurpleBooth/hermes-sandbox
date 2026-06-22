@@ -51,6 +51,7 @@ class VMInstance:
     _RUNNING_STATUSES = frozenset({"running", "active"})
 
     def is_running(self) -> bool:
+        """True when the VM is in a provider-native "reachable over SSH" state."""
         return self.status.lower() in self._RUNNING_STATUSES
 
     def preferred_ip(self) -> str:
@@ -58,6 +59,7 @@ class VMInstance:
         return self.public_ipv6 or self.public_ip
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialise to a plain dict (round-trips via :meth:`from_dict`)."""
         return asdict(self)
 
     @classmethod

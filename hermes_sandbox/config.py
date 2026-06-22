@@ -10,20 +10,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-DEFAULT_INSTANCE_TYPE = "cx23"
-DEFAULT_REGION = "nbg1"
-DEFAULT_IMAGE = "ubuntu-24.04"
+from .provider import CloudProvider
+
 DEFAULT_SSH_USER = "root"
 
 
-@dataclass
+@dataclass(frozen=True)
 class SandboxConfig:
     """Resolved configuration for the sandbox plugin."""
 
     provider_name: str = "hetzner"
-    instance_type: str = DEFAULT_INSTANCE_TYPE
-    region: str = DEFAULT_REGION
-    image: str = DEFAULT_IMAGE
+    # Field defaults come from the base CloudProvider so adding a provider
+    # (which sets its own class-level defaults) needs no edit here — no drift.
+    instance_type: str = CloudProvider.default_instance_type
+    region: str = CloudProvider.default_region
+    image: str = CloudProvider.default_image
     ssh_user: str = DEFAULT_SSH_USER
     token: str = ""
     vm_name: str = "hermes-sandbox"
@@ -34,6 +35,13 @@ class SandboxConfig:
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> SandboxConfig:
+        """Build a :class:`SandboxConfig` from ``SANDBOX_*`` environment variables.
+
+        Provider-specific defaults (region/image/instance-type) are resolved via
+        the registered provider class, so each provider declares its own defaults
+        rather than centralising them here.
+        """
+
         def _get(key: str, default: str = "") -> str:
             return env.get(key, default)
 
@@ -54,8 +62,11 @@ class SandboxConfig:
         )
 
     def is_configured(self) -> bool:
-        # A token is only required for real cloud providers; the dry-run and
-        # qemu providers run locally and need no token.
+        """True when the plugin has what it needs to run.
+
+        A token is only required for real cloud providers; the ``dry-run`` and
+        ``qemu`` providers run locally and need no token.
+        """
         return bool(self.token) or self.provider_name in ("dry-run", "qemu")
 
 

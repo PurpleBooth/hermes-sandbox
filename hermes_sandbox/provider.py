@@ -146,6 +146,7 @@ def get_provider_class(name: str) -> type[CloudProvider]:
 
 
 def available_providers() -> list[str]:
+    """Return the sorted names of every registered cloud provider."""
     return sorted(_REGISTRY)
 
 
