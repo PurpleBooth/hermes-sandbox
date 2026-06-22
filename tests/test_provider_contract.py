@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from vm_sandbox.provider import CloudProvider, available_providers, get_provider
+from hermes_sandbox.provider import CloudProvider, available_providers, get_provider
 
 # ── Fake HTTP payloads for cloud providers ──────────────────────────────────
 
@@ -25,7 +25,7 @@ _HZ_SERVER: dict[str, Any] = {
         "ipv6": {"ip": "2a01:db8::/64"},
     },
     "datacenter": {"location": {"name": "nbg1"}},
-    "labels": {"hermes-vm-sandbox": "true"},
+    "labels": {"hermes-sandbox": "true"},
     "server_type": {"name": "cx23"},
     "image": {"name": "ubuntu-24.04"},
 }
@@ -39,7 +39,7 @@ _DO_DROPLET: dict[str, Any] = {
         "v6": [{"type": "public", "ip_address": "2604::1"}],
     },
     "region": {"slug": "fra1"},
-    "tags": ["hermes-vm-sandbox"],
+    "tags": ["hermes-sandbox"],
     "size": {"slug": "s-2vcpu-4gb"},
     "image": {"slug": "ubuntu-24-04-x64"},
 }
@@ -52,7 +52,7 @@ def _hz_request(
     if method == "GET" and path.startswith("/ssh_keys"):
         return {"ssh_keys": []}
     if method == "POST" and path == "/ssh_keys":
-        return {"ssh_key": {"name": "hermes-vm-sandbox"}}
+        return {"ssh_key": {"name": "hermes-sandbox"}}
     if method == "POST" and path == "/servers":
         return {"server": _HZ_SERVER}
     if method == "GET" and path.startswith("/servers/"):
@@ -91,7 +91,7 @@ def _make_provider(name: str) -> CloudProvider:
     if name == "dry-run":
         return get_provider("dry-run", token="")
     if name == "hetzner":
-        from vm_sandbox.hetzner import HetznerProvider
+        from hermes_sandbox.hetzner import HetznerProvider
 
         return HetznerProvider(
             token="tok",
@@ -100,7 +100,7 @@ def _make_provider(name: str) -> CloudProvider:
             request_fn=_hz_request,
         )
     if name == "digitalocean":
-        from vm_sandbox.digitalocean import DigitalOceanProvider
+        from hermes_sandbox.digitalocean import DigitalOceanProvider
 
         return DigitalOceanProvider(
             token="tok",
@@ -112,8 +112,8 @@ def _make_provider(name: str) -> CloudProvider:
 
 
 # Ensure all providers are registered before collecting parametrized tests.
-import vm_sandbox.digitalocean  # noqa: F401, E402
-import vm_sandbox.hetzner  # noqa: F401, E402
+import hermes_sandbox.digitalocean  # noqa: F401, E402
+import hermes_sandbox.hetzner  # noqa: F401, E402
 
 _PROVIDERS = available_providers()
 
@@ -140,19 +140,19 @@ def test_provider_has_all_interface_methods(name: str):
 @pytest.mark.parametrize("name", _PROVIDERS)
 def test_provider_declares_token_env_keys(name: str):
     """Every provider declares which env vars hold its API token."""
-    from vm_sandbox.provider import get_provider_class
+    from hermes_sandbox.provider import get_provider_class
 
     cls = get_provider_class(name)
     assert cls.token_env_keys, f"{name}: token_env_keys must not be empty"
-    assert "VM_SANDBOX_TOKEN" in cls.token_env_keys, (
-        f"{name}: token_env_keys must include VM_SANDBOX_TOKEN as a fallback"
+    assert "SANDBOX_TOKEN" in cls.token_env_keys, (
+        f"{name}: token_env_keys must include SANDBOX_TOKEN as a fallback"
     )
 
 
 @pytest.mark.parametrize("name", _PROVIDERS)
 def test_provider_resolve_token_picks_first_non_empty(name: str):
     """resolve_token returns the first non-empty env var from token_env_keys."""
-    from vm_sandbox.provider import get_provider_class
+    from hermes_sandbox.provider import get_provider_class
 
     cls = get_provider_class(name)
     primary = cls.token_env_keys[0]
@@ -160,8 +160,8 @@ def test_provider_resolve_token_picks_first_non_empty(name: str):
     assert cls.resolve_token({primary: "secret-123"}) == "secret-123"
     # Nothing set → empty string.
     assert cls.resolve_token({}) == ""
-    # VM_SANDBOX_TOKEN fallback works when the primary isn't set.
-    assert cls.resolve_token({"VM_SANDBOX_TOKEN": "fallback"}) == "fallback"
+    # SANDBOX_TOKEN fallback works when the primary isn't set.
+    assert cls.resolve_token({"SANDBOX_TOKEN": "fallback"}) == "fallback"
 
 
 # ── Contract: provision returns a valid running VM ──────────────────────────
@@ -176,7 +176,7 @@ def test_provision_returns_running_vm_with_all_fields(name: str):
         region="test-region",
         image="test-image",
         ssh_public_key="ssh-ed25519 FAKEKEY",
-        labels={"hermes-vm-sandbox": "true"},
+        labels={"hermes-sandbox": "true"},
     )
     assert vm.id, f"{name}: VM id must be non-empty"
     assert vm.name == "contract-test-vm", f"{name}: VM name mismatch"
@@ -197,7 +197,7 @@ def test_provisioned_vm_prefers_ipv6_when_available(name: str):
         region="r",
         image="i",
         ssh_public_key="ssh-ed25519 K",
-        labels={"hermes-vm-sandbox": "true"},
+        labels={"hermes-sandbox": "true"},
     )
     # hetzner and digitalocean fakes both return IPv6; fake provider does not.
     if vm.public_ipv6:
@@ -216,7 +216,7 @@ def test_get_returns_provisioned_vm(name: str):
         region="r",
         image="i",
         ssh_public_key="ssh-ed25519 K",
-        labels={"hermes-vm-sandbox": "true"},
+        labels={"hermes-sandbox": "true"},
     )
     fetched = p.get(vm.id)
     assert fetched.id == vm.id, f"{name}: get() returned a different VM id"
@@ -236,9 +236,9 @@ def test_list_by_label_finds_provisioned_vm(name: str):
         region="r",
         image="i",
         ssh_public_key="ssh-ed25519 K",
-        labels={"hermes-vm-sandbox": "true", "extra-label": "yes"},
+        labels={"hermes-sandbox": "true", "extra-label": "yes"},
     )
-    found = p.list_by_label("hermes-vm-sandbox", "true")
+    found = p.list_by_label("hermes-sandbox", "true")
     ids = [v.id for v in found]
     assert vm.id in ids, f"{name}: list_by_label did not find the provisioned VM"
 
@@ -255,7 +255,7 @@ def test_teardown_destroys_vm(name: str):
         region="r",
         image="i",
         ssh_public_key="ssh-ed25519 K",
-        labels={"hermes-vm-sandbox": "true"},
+        labels={"hermes-sandbox": "true"},
     )
     p.teardown(vm.id)  # must not raise
 

@@ -1,4 +1,4 @@
-"""Resolved configuration for the vm-sandbox plugin.
+"""Resolved configuration for the sandbox plugin.
 
 :class:`SandboxConfig` is the value object the application layer reads; it is
 built from the process environment by :meth:`SandboxConfig.from_env`.  Provider
@@ -18,7 +18,7 @@ DEFAULT_SSH_USER = "root"
 
 @dataclass
 class SandboxConfig:
-    """Resolved configuration for the vm-sandbox plugin."""
+    """Resolved configuration for the sandbox plugin."""
 
     provider_name: str = "hetzner"
     instance_type: str = DEFAULT_INSTANCE_TYPE
@@ -35,19 +35,19 @@ class SandboxConfig:
         def _get(key: str, default: str = "") -> str:
             return env.get(key, default)
 
-        provider_name = _get("VM_SANDBOX_PROVIDER", "hetzner")
+        provider_name = _get("SANDBOX_PROVIDER", "hetzner")
         token = _resolve_token(provider_name, env)
         defaults = _provider_defaults(provider_name)
 
         return cls(
             provider_name=provider_name,
-            instance_type=_get("VM_SANDBOX_INSTANCE_TYPE", defaults["instance_type"]),
-            region=_get("VM_SANDBOX_REGION", defaults["region"]),
-            image=_get("VM_SANDBOX_IMAGE", defaults["image"]),
-            ssh_user=_get("VM_SANDBOX_SSH_USER", DEFAULT_SSH_USER),
+            instance_type=_get("SANDBOX_INSTANCE_TYPE", defaults["instance_type"]),
+            region=_get("SANDBOX_REGION", defaults["region"]),
+            image=_get("SANDBOX_IMAGE", defaults["image"]),
+            ssh_user=_get("SANDBOX_SSH_USER", DEFAULT_SSH_USER),
             token=token,
-            vm_name=_get("VM_SANDBOX_NAME", "hermes-sandbox"),
-            auto_teardown_seconds=int(_get("VM_SANDBOX_AUTO_TEARDOWN_SECONDS", "0") or "0"),
+            vm_name=_get("SANDBOX_NAME", "hermes-sandbox"),
+            auto_teardown_seconds=int(_get("SANDBOX_AUTO_TEARDOWN_SECONDS", "0") or "0"),
         )
 
     def is_configured(self) -> bool:
@@ -59,14 +59,14 @@ class SandboxConfig:
 def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
     """Resolve the API token by delegating to the provider class.
 
-    Falls back to ``VM_SANDBOX_TOKEN`` if the provider isn't registered yet
+    Falls back to ``SANDBOX_TOKEN`` if the provider isn't registered yet
     (e.g. during early config loading before provider modules are imported).
     """
     try:
         from .provider import get_provider_class
         return get_provider_class(provider_name).resolve_token(env)
     except KeyError:
-        return env.get("VM_SANDBOX_TOKEN") or ""
+        return env.get("SANDBOX_TOKEN") or ""
 
 
 def _provider_defaults(provider_name: str) -> dict[str, str]:

@@ -38,7 +38,7 @@ path = "CHANGELOG.md"
 template = "remote"
 remote = "codeberg.org"
 owner = "PurpleBooth"
-repository = "vm-sandbox-hermes"
+repository = "hermes-sandbox"
 authors = [
     { signature = "billie.thompson@example.com", username = "billie" },
 ]

@@ -4,8 +4,8 @@ import dataclasses
 
 import pytest
 
-from vm_sandbox.models import VMInstance
-from vm_sandbox.provider import (
+from hermes_sandbox.models import VMInstance
+from hermes_sandbox.provider import (
     CloudProvider,
     available_providers,
     get_provider,
@@ -66,8 +66,8 @@ def test_registry_has_dry_run_hetzner_digitalocean():
     names = available_providers()
     assert "dry-run" in names
     # hetzner + digitalocean register on import of their modules.
-    import vm_sandbox.digitalocean  # noqa: F401
-    import vm_sandbox.hetzner  # noqa: F401
+    import hermes_sandbox.digitalocean  # noqa: F401
+    import hermes_sandbox.hetzner  # noqa: F401
     assert "hetzner" in available_providers()
     assert "digitalocean" in available_providers()
 
@@ -89,7 +89,7 @@ def test_register_provider_requires_name():
 
 
 def test_dry_run_provider_provision_get_teardown():
-    from vm_sandbox.dry_run import DryRunProvider
+    from hermes_sandbox.dry_run import DryRunProvider
 
     p = DryRunProvider()
     vm = p.provision("v", "t", "r", "img", "ssh-key", labels={"x": "y"})
@@ -104,7 +104,7 @@ def test_dry_run_provider_provision_get_teardown():
 
 
 def test_poll_until_returns_when_predicate_true():
-    from vm_sandbox.provider import poll_until
+    from hermes_sandbox.provider import poll_until
 
     calls = {"n": 0}
 
@@ -119,7 +119,7 @@ def test_poll_until_returns_when_predicate_true():
 
 
 def test_poll_until_raises_on_timeout():
-    from vm_sandbox.provider import poll_until
+    from hermes_sandbox.provider import poll_until
 
     slept: list[float] = []
     # A clock that advances past the deadline on the second read.

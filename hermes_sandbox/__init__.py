@@ -1,4 +1,4 @@
-"""vm-sandbox plugin — cloud-VM terminal sandbox for Hermes Agent.
+"""sandbox plugin — cloud-VM terminal sandbox for Hermes Agent.
 
 On ``on_session_start`` the plugin provisions (or reuses) a cloud VM via
 the configured provider, then sets the ``TERMINAL_SSH_*`` environment
@@ -9,20 +9,20 @@ throwaway experiments in an isolated, ephemeral machine.
 
 Configuration (env vars; put secrets in ``~/.hermes/.env``):
 
-  VM_SANDBOX_PROVIDER          hetzner | digitalocean | dry-run   (default: hetzner)
+  SANDBOX_PROVIDER          hetzner | digitalocean | dry-run   (default: hetzner)
   HCLOUD_TOKEN                 Hetzner Cloud API token  (hetzner)
   DIGITALOCEAN_TOKEN           DigitalOcean API token   (digitalocean)
                                (DO_API_TOKEN also accepted)
-  VM_SANDBOX_INSTANCE_TYPE     e.g. cx23 / s-2vcpu-4gb  (provider default)
-  VM_SANDBOX_REGION            e.g. nbg1 / fra1         (provider default)
-  VM_SANDBOX_IMAGE             e.g. ubuntu-24.04        (provider default)
-  VM_SANDBOX_SSH_USER          default: root
-  VM_SANDBOX_NAME              default: hermes-sandbox
-  VM_SANDBOX_AUTO_TEARDOWN_SECONDS  0 = keep VM across sessions (default);
+  SANDBOX_INSTANCE_TYPE     e.g. cx23 / s-2vcpu-4gb  (provider default)
+  SANDBOX_REGION            e.g. nbg1 / fra1         (provider default)
+  SANDBOX_IMAGE             e.g. ubuntu-24.04        (provider default)
+  SANDBOX_SSH_USER          default: root
+  SANDBOX_NAME              default: hermes-sandbox
+  SANDBOX_AUTO_TEARDOWN_SECONDS  0 = keep VM across sessions (default);
                                     >0 = tear down on session end
 
 The plugin leaves ``terminal.backend`` as ``ssh`` in config.yaml (set via
-``hermes vm-sandbox enable``) and only manages the SSH connection details
+``hermes sandbox enable``) and only manages the SSH connection details
 at runtime, avoiding the config→env re-bridging race.
 """
 
@@ -63,7 +63,7 @@ def _build_manager() -> VMLifecycleManager | None:
     try:
         provider = get_provider(config.provider_name, token=config.token)
     except Exception as exc:
-        logger.warning("vm-sandbox: cannot build provider %r: %s", config.provider_name, exc)
+        logger.warning("sandbox: cannot build provider %r: %s", config.provider_name, exc)
         return None
     from hermes_constants import get_hermes_home
 
@@ -85,7 +85,7 @@ def _apply_ssh_env(manager: VMLifecycleManager) -> None:
     os.environ.update(env)
     os.environ.setdefault("TERMINAL_SSH_PERSISTENT", "true")
     logger.info(
-        "vm-sandbox: terminal backend -> ssh %s@%s",
+        "sandbox: terminal backend -> ssh %s@%s",
         env["TERMINAL_SSH_USER"], env["TERMINAL_SSH_HOST"],
     )
 
@@ -104,9 +104,9 @@ def _invalidate_cached_terminal_env() -> None:
     try:
         from tools.terminal_tool import cleanup_vm
         cleanup_vm("default")
-        logger.debug("vm-sandbox: cleared cached terminal environment for 'default'")
+        logger.debug("sandbox: cleared cached terminal environment for 'default'")
     except Exception as exc:
-        logger.debug("vm-sandbox: could not clear cached terminal env: %s", exc)
+        logger.debug("sandbox: could not clear cached terminal env: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -128,14 +128,14 @@ def _on_session_start(
     """
     manager = _manager_or_build()
     if manager is None:
-        logger.debug("vm-sandbox: not configured — skipping session-start provisioning")
+        logger.debug("sandbox: not configured — skipping session-start provisioning")
         return
     try:
         manager.ensure_vm()
         _apply_ssh_env(manager)
         _invalidate_cached_terminal_env()
     except Exception as exc:
-        logger.warning("vm-sandbox: session-start provisioning failed: %s", exc)
+        logger.warning("sandbox: session-start provisioning failed: %s", exc)
 
 
 def _on_session_end(
@@ -151,15 +151,15 @@ def _on_session_end(
     try:
         manager.maybe_auto_teardown()
     except Exception as exc:
-        logger.warning("vm-sandbox: session-end teardown failed: %s", exc)
+        logger.warning("sandbox: session-end teardown failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
-# Slash command (/vm-sandbox)
+# Slash command (/sandbox)
 # ---------------------------------------------------------------------------
 
 _HELP = """\
-/vm-sandbox — cloud-VM terminal sandbox
+/sandbox — cloud-VM terminal sandbox
 
 Subcommands:
   status      Show the current sandbox VM (or "none")
@@ -169,7 +169,7 @@ Subcommands:
   help        This message
 
 Configure via env vars (HCLOUD_TOKEN / DIGITALOCEAN_TOKEN,
-VM_SANDBOX_PROVIDER, VM_SANDBOX_INSTANCE_TYPE, ...).
+SANDBOX_PROVIDER, SANDBOX_INSTANCE_TYPE, ...).
 """
 
 
@@ -187,24 +187,24 @@ def _handle_slash(raw_args: str) -> str | None:
     manager = _manager_or_build()
     if manager is None:
         return (
-            "[vm-sandbox] Not configured. Set VM_SANDBOX_PROVIDER and a cloud "
+            "[sandbox] Not configured. Set SANDBOX_PROVIDER and a cloud "
             "token (e.g. HCLOUD_TOKEN) in ~/.hermes/.env, then run "
-            "`hermes vm-sandbox enable`."
+            "`hermes sandbox enable`."
         )
 
     if sub == "status":
         st = manager.status()
         if not st:
-            return "[vm-sandbox] No sandbox VM recorded."
+            return "[sandbox] No sandbox VM recorded."
         return json.dumps(st.to_dict(), indent=2, default=str)
 
     if sub == "provision":
         vm = manager.ensure_vm()
-        return f"[vm-sandbox] VM ready: {vm.id} @ {vm.preferred_ip()} ({vm.provider})"
+        return f"[sandbox] VM ready: {vm.id} @ {vm.preferred_ip()} ({vm.provider})"
 
     if sub == "teardown":
         ok = manager.teardown()
-        return "[vm-sandbox] VM torn down." if ok else "[vm-sandbox] No VM to tear down."
+        return "[sandbox] VM torn down." if ok else "[sandbox] No VM to tear down."
 
     return f"Unknown subcommand: {sub}\n\n{_HELP}"
 
@@ -215,18 +215,18 @@ def _enable_ssh_backend() -> str:
         from hermes_cli.config import set_config_value
 
         set_config_value("terminal.backend", "ssh")
-        return "[vm-sandbox] Set terminal.backend=ssh. Restart Hermes to apply."
+        return "[sandbox] Set terminal.backend=ssh. Restart Hermes to apply."
     except Exception as exc:
-        return f"[vm-sandbox] Could not set terminal.backend=ssh: {exc}\nRun: hermes config set terminal.backend ssh"
+        return f"[sandbox] Could not set terminal.backend=ssh: {exc}\nRun: hermes config set terminal.backend ssh"
 
 
 # ---------------------------------------------------------------------------
-# CLI subcommand (hermes vm-sandbox ...)
+# CLI subcommand (hermes sandbox ...)
 # ---------------------------------------------------------------------------
 
 
 def _setup_cli(parser: argparse.ArgumentParser) -> None:
-    sub = parser.add_subparsers(dest="vm_sandbox_action")
+    sub = parser.add_subparsers(dest="hermes_sandbox_action")
     sub.add_parser("status", help="Show the current sandbox VM")
     sub.add_parser("provision", help="Provision/reuse a VM now")
     sub.add_parser("teardown", help="Destroy the recorded sandbox VM")
@@ -235,7 +235,7 @@ def _setup_cli(parser: argparse.ArgumentParser) -> None:
 
 
 def _handle_cli(args: argparse.Namespace) -> int:
-    action = getattr(args, "vm_sandbox_action", None) or "status"
+    action = getattr(args, "hermes_sandbox_action", None) or "status"
     if action == "available":
         from .provider import available_providers
 
@@ -255,13 +255,13 @@ def register(ctx: Any) -> None:
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_command(
-        "vm-sandbox",
+        "sandbox",
         handler=_handle_slash,
         description="Cloud-VM terminal sandbox: provision/status/teardown.",
         args_hint="<status|provision|teardown|enable>",
     )
     ctx.register_cli_command(
-        "vm-sandbox",
+        "sandbox",
         help="Manage the cloud-VM terminal sandbox.",
         setup_fn=_setup_cli,
         handler_fn=_handle_cli,

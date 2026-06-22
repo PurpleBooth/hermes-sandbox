@@ -1,4 +1,4 @@
-"""Dry-run provider for the vm-sandbox plugin.
+"""Dry-run provider for the sandbox plugin.
 
 :class:`DryRunProvider` simulates provisioning entirely in memory — no cloud
 credentials, no network.  It goes through the exact same lifecycle
@@ -6,7 +6,7 @@ credentials, no network.  It goes through the exact same lifecycle
 the plugin, exercise the lifecycle in tests, and verify a setup end-to-end
 without spending money.
 
-Registered as ``dry-run``; select it with ``VM_SANDBOX_PROVIDER=dry-run``.
+Registered as ``dry-run``; select it with ``SANDBOX_PROVIDER=dry-run``.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Property-based tests for the pure domain logic of vm-sandbox.
+"""Property-based tests for the pure domain logic of sandbox.
 
 These exercise invariants that hold for *any* input, not just hand-picked
 examples — the kind of bug (off-by-one, wrong-default, broken roundtrip) that
@@ -16,10 +16,10 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from vm_sandbox.config import SandboxConfig
-from vm_sandbox.models import VMInstance
-from vm_sandbox.provider import poll_until
-from vm_sandbox.state import JsonStateRepository, SandboxState
+from hermes_sandbox.config import SandboxConfig
+from hermes_sandbox.models import VMInstance
+from hermes_sandbox.provider import poll_until
+from hermes_sandbox.state import JsonStateRepository, SandboxState
 
 # A non-empty text strategy for identifiers / values that must be meaningful.
 # Env var names/values cannot contain NUL (os.environ rejects it), so we
@@ -89,7 +89,7 @@ def test_preferred_ip_falls_back_to_ipv4_when_no_ipv6(ipv4: str):
     ),
 )
 def test_resolve_token_picks_first_non_empty(pairs):
-    from vm_sandbox.provider import CloudProvider
+    from hermes_sandbox.provider import CloudProvider
 
     keys = [k for k, _ in pairs]
     env = dict(pairs)
@@ -119,12 +119,12 @@ def test_resolve_token_picks_first_non_empty(pairs):
     instance_type=nonempty_text,
 )
 def test_config_from_env_overrides_win(monkeypatch, region, image, instance_type):
-    """A VM_SANDBOX_* env var always beats the provider's default."""
-    monkeypatch.setenv("VM_SANDBOX_PROVIDER", "hetzner")
+    """A SANDBOX_* env var always beats the provider's default."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "hetzner")
     monkeypatch.setenv("HCLOUD_TOKEN", "tok")
-    monkeypatch.setenv("VM_SANDBOX_REGION", region)
-    monkeypatch.setenv("VM_SANDBOX_IMAGE", image)
-    monkeypatch.setenv("VM_SANDBOX_INSTANCE_TYPE", instance_type)
+    monkeypatch.setenv("SANDBOX_REGION", region)
+    monkeypatch.setenv("SANDBOX_IMAGE", image)
+    monkeypatch.setenv("SANDBOX_INSTANCE_TYPE", instance_type)
     cfg = SandboxConfig.from_env(dict(os.environ))
     assert cfg.region == region
     assert cfg.image == image

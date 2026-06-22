@@ -1,9 +1,9 @@
-"""Core domain model + error for vm-sandbox.
+"""Core domain model + error for sandbox.
 
 :class:`VMInstance` is the provider-agnostic description of a (provisioning or
 running) VM — a frozen value object.  :class:`ApiError` is the structured REST
 failure raised by the provider HTTP layer.  Both are pure domain types with no
-dependency on any other vm_sandbox module, so everything else can import them
+dependency on any other hermes_sandbox module, so everything else can import them
 without risk of cycles.
 """
 

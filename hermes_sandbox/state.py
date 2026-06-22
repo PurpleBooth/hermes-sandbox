@@ -129,7 +129,7 @@ class JsonStateRepository:
         except (ValueError, OSError) as exc:
             # ValueError covers JSONDecodeError + UnicodeDecodeError; OSError
             # covers permission/IO failures.  Other exceptions propagate.
-            logger.warning("vm-sandbox state file unreadable: %s", exc)
+            logger.warning("sandbox state file unreadable: %s", exc)
             return None
 
     @staticmethod

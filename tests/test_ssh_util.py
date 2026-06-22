@@ -13,7 +13,7 @@ import stat
 
 import pytest
 
-from vm_sandbox.ssh_util import chmod_private_key, generate_keypair, restrict_to_owner
+from hermes_sandbox.ssh_util import chmod_private_key, generate_keypair, restrict_to_owner
 
 needs_ssh_keygen = pytest.mark.skipif(
     shutil.which("ssh-keygen") is None, reason="ssh-keygen not on PATH"
@@ -24,7 +24,7 @@ needs_ssh_keygen = pytest.mark.skipif(
 def test_generate_keypair_creates_real_ed25519_key(tmp_path):
     kp = generate_keypair(tmp_path, "test-key")
     assert kp.public_key.startswith("ssh-ed25519 ")
-    assert kp.public_key.endswith("hermes-vm-sandbox")  # hardcoded comment
+    assert kp.public_key.endswith("hermes-sandbox")  # hardcoded comment
     assert kp.private_path.endswith("test-key")
     assert kp.public_path.endswith("test-key.pub")
     # Private key is owner-only (ssh-keygen creates 0600).
@@ -50,7 +50,7 @@ def test_generate_keypair_is_idempotent_across_calls(tmp_path):
 def test_wait_for_ssh_returns_false_on_closed_port(tmp_path):
     """Against a port nothing listens on, wait_for_ssh must fail fast and
     return False — not hang.  Uses a tiny timeout so the test stays quick."""
-    from vm_sandbox.ssh_util import wait_for_ssh
+    from hermes_sandbox.ssh_util import wait_for_ssh
 
     # Generate a real key so the probe gets far enough to fail on connection.
     if shutil.which("ssh-keygen") is None:

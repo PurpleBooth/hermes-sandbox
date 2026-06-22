@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # test-harness/specdown — wraps specdown with a throwaway HERMES_HOME that
-# has the vm-sandbox plugin enabled, so specs can invoke `hermes vm-sandbox`
+# has the sandbox plugin enabled, so specs can invoke `hermes sandbox`
 # exactly like a real user would.
 #
 # Cloud provider tokens are forwarded from the caller's environment so the
@@ -19,10 +19,10 @@ trap 'rm -rf "$TEMPORARY_HOME"' EXIT
 
 # Set up an isolated Hermes home with the plugin symlinked in.
 mkdir -p "$TEMPORARY_HOME/plugins"
-ln -s "$REPOSITORY_DIR/vm_sandbox" "$TEMPORARY_HOME/plugins/vm-sandbox"
+ln -s "$REPOSITORY_DIR/hermes_sandbox" "$TEMPORARY_HOME/plugins/sandbox"
 
 export HERMES_HOME="$TEMPORARY_HOME"
-hermes plugins enable vm-sandbox >/dev/null
+hermes plugins enable sandbox >/dev/null
 hermes config set terminal.backend ssh >/dev/null
 
 # Build the spec file list.  The dry-run provider and reference specs always
@@ -48,12 +48,12 @@ if [ $# -gt 0 ]; then
 fi
 
 # Forward HERMES_HOME and any cloud tokens to every script block.
-# Unset VM_SANDBOX_PROVIDER so specs that test the "not configured" state
+# Unset SANDBOX_PROVIDER so specs that test the "not configured" state
 # don't pick up a stale value from the caller's environment — specs that
-# need it set it inline (e.g. VM_SANDBOX_PROVIDER=dry-run hermes vm-sandbox ...).
+# need it set it inline (e.g. SANDBOX_PROVIDER=dry-run hermes sandbox ...).
 ENV_ARGS=(
 	--env "HERMES_HOME=$TEMPORARY_HOME"
-	--unset-env VM_SANDBOX_PROVIDER
+	--unset-env SANDBOX_PROVIDER
 )
 
 # Forward cloud tokens if present in the caller's environment.

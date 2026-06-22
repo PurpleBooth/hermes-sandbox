@@ -1,4 +1,4 @@
-"""Cloud provider abstraction for the vm-sandbox plugin.
+"""Cloud provider abstraction for the sandbox plugin.
 
 Each provider implements the same :class:`CloudProvider` interface so the
 lifecycle manager and session hook stay cloud-agnostic.  A provider is
@@ -9,8 +9,8 @@ The interface is deliberately minimal: provision a VM (injecting an SSH
 public key), describe it, tear it down, and list VMs carrying a given
 label so the lifecycle manager can find a previously-created sandbox.
 
-Domain value objects (:class:`~vm_sandbox.models.VMInstance`,
-:class:`~vm_sandbox.models.ApiError`) live in :mod:`vm_sandbox.models`.
+Domain value objects (:class:`~hermes_sandbox.models.VMInstance`,
+:class:`~hermes_sandbox.models.ApiError`) live in :mod:`hermes_sandbox.models`.
 """
 
 from __future__ import annotations
@@ -38,12 +38,12 @@ class CloudProvider(ABC):
     name: str = ""
 
     #: Environment variables checked (in order) when resolving the API token.
-    #: The first non-empty value wins.  ``VM_SANDBOX_TOKEN`` is a generic
+    #: The first non-empty value wins.  ``SANDBOX_TOKEN`` is a generic
     #: fallback so users can set one token for any provider.
-    token_env_keys: tuple[str, ...] = ("VM_SANDBOX_TOKEN",)
+    token_env_keys: tuple[str, ...] = ("SANDBOX_TOKEN",)
 
     #: Provider-specific defaults applied by ``SandboxConfig.from_env`` when the
-    #: corresponding ``VM_SANDBOX_*`` env var is unset.  Subclasses override
+    #: corresponding ``SANDBOX_*`` env var is unset.  Subclasses override
     #: these so adding a provider needs no edit to ``SandboxConfig``.
     default_region: str = "nbg1"
     default_image: str = "ubuntu-24.04"

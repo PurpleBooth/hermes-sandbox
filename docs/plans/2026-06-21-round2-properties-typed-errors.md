@@ -1,4 +1,4 @@
-# vm-sandbox Round 2: Property-Based Testing, Typed Errors, DRY Providers
+# sandbox Round 2: Property-Based Testing, Typed Errors, DRY Providers
 
 > Iterative refinement on top of commit de7868d (round 1).
 
@@ -11,7 +11,7 @@ values. These are textbook PBT targets:
 - `preferred_ip()` — always picks IPv6 when present, else IPv4, for any pair.
 - `resolve_token()` — returns first non-empty from the ordered keys, for any
   env/keys combination.
-- `SandboxConfig.from_env()` — an explicit VM_SANDBOX_* override always wins
+- `SandboxConfig.from_env()` — an explicit SANDBOX_* override always wins
   over the provider default; token comes from the provider's env key.
 - `poll_until()` — calls predicate ≥1 time; raises only after deadline; never
   sleeps after success.

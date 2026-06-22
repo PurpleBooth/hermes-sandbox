@@ -1,4 +1,4 @@
-# vm-sandbox — task runner
+# sandbox — task runner
 # Run `just` with no args to see all recipes.
 
 default: check
@@ -29,7 +29,7 @@ fix:
 fmt:
     uv run ruff format .
 
-# End-to-end specdown tests (invokes `hermes vm-sandbox` CLI via a throwaway
+# End-to-end specdown tests (invokes `hermes sandbox` CLI via a throwaway
 # HERMES_HOME).  Installs specdown if not on PATH, then runs the specs in docs/.
 # Cloud tokens (HCLOUD_TOKEN, DIGITALOCEAN_TOKEN) are forwarded from the
 # environment — when absent, the corresponding provider task spec is skipped.

@@ -1,12 +1,12 @@
-"""Hetzner Cloud provider for the vm-sandbox plugin.
+"""Hetzner Cloud provider for the sandbox plugin.
 
 Uses the public Hetzner Cloud REST API (https://api.hetzner.cloud/v1) over
 stdlib :mod:`urllib` — no third-party dependency required.  Auth is a
 Bearer token (``HCLOUD_TOKEN``).
 
 The provider creates a server with an injected SSH public key, polls until
-it has a public IPv4, and returns a :class:`~vm_sandbox.provider.VMInstance`.
-Servers are labelled ``hermes-vm-sandbox=true`` so the lifecycle manager
+it has a public IPv4, and returns a :class:`~hermes_sandbox.provider.VMInstance`.
+Servers are labelled ``hermes-sandbox=true`` so the lifecycle manager
 can discover sandboxes created by a previous Hermes process.
 """
 
@@ -21,7 +21,7 @@ from .provider import RestCloudProvider, poll_until, register_provider
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.hetzner.cloud/v1"
-_DEFAULT_LABEL_KEY = "hermes-vm-sandbox"
+_DEFAULT_LABEL_KEY = "hermes-sandbox"
 _DEFAULT_LABEL_VALUE = "true"
 
 
@@ -73,7 +73,7 @@ class HetznerProvider(RestCloudProvider):
 
     name = "hetzner"
     api_base = API_BASE
-    token_env_keys = ("HCLOUD_TOKEN", "VM_SANDBOX_TOKEN")
+    token_env_keys = ("HCLOUD_TOKEN", "SANDBOX_TOKEN")
     default_region = "nbg1"
     default_image = "ubuntu-24.04"
     default_instance_type = "cx23"
@@ -83,7 +83,7 @@ class HetznerProvider(RestCloudProvider):
 
     # -- helpers -----------------------------------------------------------
 
-    def _ensure_ssh_key(self, public_key: str, name: str = "hermes-vm-sandbox") -> str:
+    def _ensure_ssh_key(self, public_key: str, name: str = "hermes-sandbox") -> str:
         """Upload the public key (idempotent) and return its name."""
         # Try to find an existing key with this name or fingerprint.
         try:

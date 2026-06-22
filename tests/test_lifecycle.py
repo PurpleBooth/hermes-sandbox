@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from vm_sandbox.config import SandboxConfig
-from vm_sandbox.dry_run import DryRunProvider
-from vm_sandbox.lifecycle import VMLifecycleManager
+from hermes_sandbox.config import SandboxConfig
+from hermes_sandbox.dry_run import DryRunProvider
+from hermes_sandbox.lifecycle import VMLifecycleManager
 
 
 def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None,
@@ -26,9 +26,9 @@ def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None,
 
 
 def test_config_from_env_hetzner(monkeypatch):
-    monkeypatch.setenv("VM_SANDBOX_PROVIDER", "hetzner")
+    monkeypatch.setenv("SANDBOX_PROVIDER", "hetzner")
     monkeypatch.setenv("HCLOUD_TOKEN", "tok")
-    monkeypatch.setenv("VM_SANDBOX_INSTANCE_TYPE", "cpx21")
+    monkeypatch.setenv("SANDBOX_INSTANCE_TYPE", "cpx21")
     cfg = SandboxConfig.from_env(__import__("os").environ)
     assert cfg.provider_name == "hetzner"
     assert cfg.token == "tok"
@@ -37,8 +37,8 @@ def test_config_from_env_hetzner(monkeypatch):
 
 
 def test_config_from_env_hetzner_defaults(monkeypatch):
-    """Hetzner's own defaults apply when no VM_SANDBOX_* override is set."""
-    monkeypatch.setenv("VM_SANDBOX_PROVIDER", "hetzner")
+    """Hetzner's own defaults apply when no SANDBOX_* override is set."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "hetzner")
     monkeypatch.setenv("HCLOUD_TOKEN", "tok")
     cfg = SandboxConfig.from_env(__import__("os").environ)
     assert cfg.region == "nbg1"
@@ -47,7 +47,7 @@ def test_config_from_env_hetzner_defaults(monkeypatch):
 
 
 def test_config_from_env_digitalocean_defaults(monkeypatch):
-    monkeypatch.setenv("VM_SANDBOX_PROVIDER", "digitalocean")
+    monkeypatch.setenv("SANDBOX_PROVIDER", "digitalocean")
     monkeypatch.setenv("DIGITALOCEAN_TOKEN", "dotok")
     cfg = SandboxConfig.from_env(__import__("os").environ)
     assert cfg.provider_name == "digitalocean"
@@ -178,7 +178,7 @@ def test_status_returns_none_without_state(tmp_path, fake_key_factory):
 
 
 def test_load_state_returns_none_on_corrupt_json(tmp_path):
-    from vm_sandbox.state import JsonStateRepository
+    from hermes_sandbox.state import JsonStateRepository
 
     repo = JsonStateRepository(tmp_path)
     repo.path.write_text("{not valid json")
@@ -186,7 +186,7 @@ def test_load_state_returns_none_on_corrupt_json(tmp_path):
 
 
 def test_load_state_returns_none_on_non_dict_json(tmp_path):
-    from vm_sandbox.state import JsonStateRepository
+    from hermes_sandbox.state import JsonStateRepository
 
     repo = JsonStateRepository(tmp_path)
     repo.path.write_text("[1, 2, 3]")
@@ -194,7 +194,7 @@ def test_load_state_returns_none_on_non_dict_json(tmp_path):
 
 
 def test_load_state_returns_none_on_unreadable_path(tmp_path):
-    from vm_sandbox.state import JsonStateRepository
+    from hermes_sandbox.state import JsonStateRepository
 
     repo = JsonStateRepository(tmp_path)
     # Point the backing path at a directory — read_text() raises IsADirectoryError (OSError).
@@ -204,7 +204,7 @@ def test_load_state_returns_none_on_unreadable_path(tmp_path):
 
 def test_state_repository_roundtrip(tmp_path):
     """save() then load() returns an equal SandboxState (typed persistence)."""
-    from vm_sandbox.state import JsonStateRepository, SandboxState
+    from hermes_sandbox.state import JsonStateRepository, SandboxState
 
     repo = JsonStateRepository(tmp_path)
     assert repo.load() is None  # nothing yet
@@ -224,7 +224,7 @@ def test_state_repository_roundtrip(tmp_path):
 def test_manager_accepts_injected_state_repo(tmp_path, fake_key_factory):
     """The manager depends on the StateRepository Protocol, not the filesystem:
     an in-memory repo lets the use-case run without any file I/O."""
-    from vm_sandbox.state import SandboxState
+    from hermes_sandbox.state import SandboxState
 
     class InMemoryRepo:
         def __init__(self) -> None:
@@ -250,7 +250,7 @@ def test_manager_accepts_injected_state_repo(tmp_path, fake_key_factory):
     vm = mgr.ensure_vm()
     assert vm.is_running()
     # No state.json file was created — the in-memory repo holds it.
-    assert not (tmp_path / ".hermes" / "vm-sandbox").exists()
+    assert not (tmp_path / ".hermes" / "sandbox").exists()
     assert mgr.ssh_env() is not None  # repo-backed state is readable
 
 
@@ -262,7 +262,7 @@ def test_ssh_env_returns_mapping_when_provisioned(tmp_path, fake_key_factory):
     assert env["TERMINAL_ENV"] == "ssh"
     assert env["TERMINAL_SSH_HOST"]
     assert env["TERMINAL_SSH_USER"] == "root"
-    assert env["TERMINAL_SSH_KEY"].endswith("hermes-vm-sandbox")
+    assert env["TERMINAL_SSH_KEY"].endswith("hermes-sandbox")
 
 
 def test_ssh_env_returns_none_without_state(tmp_path, fake_key_factory):
@@ -271,7 +271,7 @@ def test_ssh_env_returns_none_without_state(tmp_path, fake_key_factory):
 
 
 def test_status_returns_sandboxstatus_value_object(tmp_path, fake_key_factory):
-    from vm_sandbox.lifecycle import SandboxStatus
+    from hermes_sandbox.lifecycle import SandboxStatus
 
     mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
     mgr.ensure_vm()
@@ -304,7 +304,7 @@ def test_sandboxstatus_is_frozen():
     """SandboxStatus is an immutable value object."""
     import dataclasses
 
-    from vm_sandbox.lifecycle import SandboxStatus
+    from hermes_sandbox.lifecycle import SandboxStatus
 
     st = SandboxStatus(
         vm_id="1", provider="dry-run", name="n", region="r", public_ip="1.2.3.4",

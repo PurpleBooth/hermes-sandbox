@@ -1,8 +1,8 @@
-"""DigitalOcean provider for the vm-sandbox plugin.
+"""DigitalOcean provider for the sandbox plugin.
 
 Uses the DigitalOcean REST API v2 (https://api.digitalocean.com/v2) over
 stdlib :mod:`urllib`.  Auth is a Bearer token (``DIGITALOCEAN_TOKEN`` /
-``DO_API_TOKEN``).  Droplets are tagged ``hermes-vm-sandbox`` so the
+``DO_API_TOKEN``).  Droplets are tagged ``hermes-sandbox`` so the
 lifecycle manager can discover sandboxes from a previous process.
 
 Droplet creation is async: the API returns a Droplet in ``new`` state, and
@@ -22,7 +22,7 @@ from .provider import RestCloudProvider, poll_until, register_provider
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.digitalocean.com/v2"
-_TAG = "hermes-vm-sandbox"
+_TAG = "hermes-sandbox"
 
 
 def _public_ipv4(droplet: dict[str, Any]) -> str:
@@ -64,7 +64,7 @@ class DigitalOceanProvider(RestCloudProvider):
 
     name = "digitalocean"
     api_base = API_BASE
-    token_env_keys = ("DIGITALOCEAN_TOKEN", "DO_API_TOKEN", "VM_SANDBOX_TOKEN")
+    token_env_keys = ("DIGITALOCEAN_TOKEN", "DO_API_TOKEN", "SANDBOX_TOKEN")
     default_region = "fra1"
     default_image = "ubuntu-24-04-x64"
     default_instance_type = "s-2vcpu-4gb"
@@ -143,7 +143,7 @@ class DigitalOceanProvider(RestCloudProvider):
 
     # -- helpers -----------------------------------------------------------
 
-    def _ensure_ssh_key(self, public_key: str, name: str = "hermes-vm-sandbox") -> str:
+    def _ensure_ssh_key(self, public_key: str, name: str = "hermes-sandbox") -> str:
         """Upload the public key (idempotent) and return its DO key id (str)."""
         try:
             listing = self._request("GET", "/account/keys", self.token)
