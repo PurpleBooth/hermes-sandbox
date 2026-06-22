@@ -1,23 +1,37 @@
-"""Tests for the QEMU local hypervisor provider."""
+"""Tests for the QEMU local hypervisor provider.
+
+Unit tests use a fake runner to verify command construction without needing
+QEMU installed.  The contract tests in ``test_provider_contract.py`` use the
+real subprocess runner and skip when QEMU or an ISO builder (xorriso /
+genisoimage / mkisofs) is not on PATH.
+"""
 
 from __future__ import annotations
 
+import signal
 import subprocess
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from hermes_sandbox.models import VMInstance
 from hermes_sandbox.provider import available_providers, get_provider
-from hermes_sandbox.qemu import QemuProvider
+from hermes_sandbox.qemu import (
+    QemuProvider,
+    _build_cloud_init_seed,
+    _default_downloader,
+    _default_runner,
+    _find_iso_builder,
+    _iso_build_prefix,
+    _kill_pidfile,
+    _parse_instance_type,
+)
 
 
 def _fake_runner(returncode: int = 0, stdout: str = "", stderr: str = ""):
     """Build a fake subprocess runner that records every command."""
     calls: list[list[str]] = []
 
-    def runner(cmd: list[str]) -> subprocess.CompletedProcess:
+    def runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
 
@@ -47,7 +61,7 @@ def test_qemu_accepts_empty_token():
 
 def test_qemu_provision_starts_vm_and_returns_running_instance():
     runner = _fake_runner()
-    p = QemuProvider(runner=runner, ssh_base_port=2222)
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
     vm = p.provision(
         name="test-vm",
         instance_type="2cpu-4gb",
@@ -62,18 +76,23 @@ def test_qemu_provision_starts_vm_and_returns_running_instance():
     assert vm.public_ip == "127.0.0.1"
     assert vm.region == "local"
     assert vm.provider == "qemu"
-    # SSH port is in extra so the lifecycle manager can wire TERMINAL_SSH_PORT.
-    assert vm.extra["ssh_port"] == 2222
-    # The runner was called with a qemu-system command.
-    assert len(runner.calls) == 1
-    assert "qemu-system-x86_64" in runner.calls[0][0]
-    assert "-daemonize" in runner.calls[0]
+    # SSH port is a random ephemeral port allocated by the OS, stored in extra
+    # so the lifecycle manager can wire TERMINAL_SSH_PORT.
+    lo, hi = (int(x) for x in Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split())
+    assert lo <= vm.extra["ssh_port"] <= hi, (
+        f"expected kernel ephemeral port in [{lo}, {hi}], got {vm.extra['ssh_port']}"
+    )
+    # The runner was called twice: once for genisoimage, once for qemu-system.
+    assert len(runner.calls) == 2
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]]
+    assert len(qemu_cmd) == 1
+    assert "-daemonize" in qemu_cmd[0]
 
 
 def test_qemu_provision_parses_instance_type():
     """Instance type '4cpu-8gb' maps to -smp 4 -m 8192."""
     runner = _fake_runner()
-    p = QemuProvider(runner=runner)
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
     p.provision(
         name="v",
         instance_type="4cpu-8gb",
@@ -81,25 +100,30 @@ def test_qemu_provision_parses_instance_type():
         image="/img.qcow2",
         ssh_public_key="k",
     )
-    cmd = runner.calls[0]
-    assert "-smp" in cmd
-    assert cmd[cmd.index("-smp") + 1] == "4"
-    assert "-m" in cmd
-    assert cmd[cmd.index("-m") + 1] == "8192"
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
+    assert "-smp" in qemu_cmd
+    assert qemu_cmd[qemu_cmd.index("-smp") + 1] == "4"
+    assert "-m" in qemu_cmd
+    assert qemu_cmd[qemu_cmd.index("-m") + 1] == "8192"
 
 
-def test_qemu_provision_increments_ssh_port():
-    """Each VM gets a different SSH port."""
+def test_qemu_provision_allocates_distinct_ssh_ports(monkeypatch):
+    """Each VM gets a different SSH port, recorded in extra."""
+    ports = iter([54321, 54322])
+    monkeypatch.setattr(
+        "hermes_sandbox.qemu.QemuProvider._next_ssh_port",
+        lambda self: next(ports),
+    )
     runner = _fake_runner()
-    p = QemuProvider(runner=runner, ssh_base_port=2222)
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
     vm1 = p.provision("v1", "2cpu-2gb", "local", "/img.qcow2", "k")
     vm2 = p.provision("v2", "2cpu-2gb", "local", "/img.qcow2", "k")
-    assert vm1.extra["ssh_port"] == 2222
-    assert vm2.extra["ssh_port"] == 2223
+    assert vm1.extra["ssh_port"] == 54321, f"expected 54321, got {vm1.extra['ssh_port']}"
+    assert vm2.extra["ssh_port"] == 54322, f"expected 54322, got {vm2.extra['ssh_port']}"
 
 
 def test_qemu_get_returns_provisioned_vm():
-    p = QemuProvider(runner=_fake_runner())
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage")
     vm = p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k")
     fetched = p.get(vm.id)
     assert fetched.id == vm.id
@@ -108,34 +132,42 @@ def test_qemu_get_returns_provisioned_vm():
 
 
 def test_qemu_get_missing_raises_keyerror():
-    p = QemuProvider(runner=_fake_runner())
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage")
     with pytest.raises(KeyError):
         p.get("nonexistent")
 
 
-def test_qemu_teardown_kills_process_and_removes_from_memory():
-    runner = _fake_runner()
-    p = QemuProvider(runner=runner)
+def test_qemu_teardown_sends_sigterm_and_removes_from_memory(monkeypatch, tmp_path):
+    """teardown SIGTERMs the recorded QEMU PID (os.kill) and forgets the VM."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr("hermes_sandbox.qemu.os.kill", lambda pid, sig: killed.append((pid, sig)))
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
     vm = p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k")
+    # provision() with a fake runner doesn't start QEMU, so write the pidfile
+    # teardown() will read.
+    pidfile = tmp_path / "v" / "qemu.pid"
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("4242")
     p.teardown(vm.id)
-    # teardown called the runner with a pkill command.
-    teardown_calls = [c for c in runner.calls if c and c[0] == "pkill"]
-    assert len(teardown_calls) >= 1
-    # VM is gone from memory.
+    assert (4242, signal.SIGTERM) in killed, "teardown must SIGTERM the recorded PID"
     with pytest.raises(KeyError):
         p.get(vm.id)
 
 
 def test_qemu_teardown_missing_is_noop():
     """Tearing down a VM that doesn't exist must not raise."""
-    p = QemuProvider(runner=_fake_runner())
-    p.teardown("nonexistent")  # must not raise
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage")
+    p.teardown("nonexistent")
 
 
 def test_qemu_list_by_label_finds_provisioned_vm():
-    p = QemuProvider(runner=_fake_runner())
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage")
     p.provision(
-        "v", "2cpu-2gb", "local", "/img.qcow2", "k",
+        "v",
+        "2cpu-2gb",
+        "local",
+        "/img.qcow2",
+        "k",
         labels={"hermes-sandbox": "true"},
     )
     found = p.list_by_label("hermes-sandbox", "true")
@@ -144,32 +176,51 @@ def test_qemu_list_by_label_finds_provisioned_vm():
 
 
 def test_qemu_list_by_label_empty_when_no_match():
-    p = QemuProvider(runner=_fake_runner())
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage")
     assert p.list_by_label("hermes-sandbox", "true") == []
 
 
 def test_qemu_provision_includes_image_in_command():
     runner = _fake_runner()
-    p = QemuProvider(runner=runner)
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
     p.provision("v", "2cpu-2gb", "local", "/data/ubuntu.qcow2", "k")
-    cmd = runner.calls[0]
-    # The qcow2 path should appear in the -drive argument.
-    drive_args = [a for a in cmd if "/data/ubuntu.qcow2" in a]
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
+    drive_args = [a for a in qemu_cmd if "/data/ubuntu.qcow2" in a]
     assert drive_args, "qcow2 image path must be in the QEMU command"
 
 
-def test_qemu_provision_includes_ssh_key_in_cloud_init():
-    """The SSH public key is passed to the VM via cloud-init."""
+def test_qemu_provision_builds_cloud_init_seed_iso():
+    """provision() calls genisoimage/mkisofs to build a real cloud-init ISO."""
     runner = _fake_runner()
-    p = QemuProvider(runner=runner)
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
     p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "ssh-ed25519 AAAAB3Nza...")
-    cmd = runner.calls[0]
-    # cloud-init data is passed via -drive with a seed image or -fw_cfg.
-    # We accept any mechanism as long as the key string is somewhere in the command.
-    cmd_str = " ".join(cmd)
-    assert "ssh-ed25519" in cmd_str or "cloud-init" in cmd_str.lower() or "cidata" in cmd_str.lower(), (
-        "SSH public key must be passed to the VM (cloud-init, cidata, or fw_cfg)"
-    )
+    iso_cmds = [c for c in runner.calls if c and c[0] in ("genisoimage", "mkisofs")]
+    assert len(iso_cmds) == 1, "provision must call genisoimage/mkisofs to build the seed ISO"
+    cmd = iso_cmds[0]
+    assert "-volid" in cmd
+    assert cmd[cmd.index("-volid") + 1] == "cidata"
+    assert "-output" in cmd
+    assert "cidata.iso" in cmd[cmd.index("-output") + 1]
+
+
+def test_qemu_provision_writes_cloud_init_user_data(tmp_path):
+    """The SSH public key is written to the user-data file before building the ISO."""
+    runner = _fake_runner()
+    p = QemuProvider(runner=runner, iso_bin="genisoimage", work_dir=tmp_path)
+    p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "ssh-ed25519 AAAAB3Nza...")
+    user_data = (p._work_dir / "v" / "cidata" / "user-data").read_text()
+    assert "ssh-ed25519 AAAAB3Nza..." in user_data
+    assert "#cloud-config" in user_data
+
+
+def test_qemu_provision_includes_seed_iso_in_qemu_command():
+    """The QEMU command must include the cloud-init seed ISO as a drive."""
+    runner = _fake_runner()
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
+    p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k")
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
+    drive_args = [a for a in qemu_cmd if "cidata.iso" in a]
+    assert drive_args, "QEMU command must include the cloud-init seed ISO"
 
 
 # ── Image resolution / download ──────────────────────────────────────────────
@@ -199,19 +250,20 @@ def test_qemu_provision_downloads_image_when_url(tmp_path):
     runner = _fake_runner()
     downloaded: dict[str, Path] = {}
     downloader = _fake_downloader(downloaded)
-    p = QemuProvider(runner=runner, work_dir=tmp_path, downloader=downloader)
+    p = QemuProvider(runner=runner, iso_bin="genisoimage", work_dir=tmp_path, downloader=downloader)
     p.provision(
-        "v", "2cpu-2gb", "local",
+        "v",
+        "2cpu-2gb",
+        "local",
         "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
         "k",
     )
-    # The downloader was called with the URL.
     assert downloaded["url"].startswith("https://cloud-images.ubuntu.com")
-    # The QEMU command uses the local cached path, not the URL.
-    cmd = runner.calls[0]
-    drive_args = [a for a in cmd if "qcow2" in a and "file=" in a]
-    assert not any("https://" in a for a in drive_args), "QEMU command must use a local path, not a URL"
-    # The cached file exists.
+    qemu_cmd = [c for c in runner.calls if "qemu-system-x86_64" in c[0]][0]
+    drive_args = [a for a in qemu_cmd if "qcow2" in a and "file=" in a]
+    assert not any("https://" in a for a in drive_args), (
+        "QEMU command must use a local path, not a URL"
+    )
     assert downloaded["dest"].exists()
 
 
@@ -225,7 +277,9 @@ def test_qemu_provision_reuses_cached_image(tmp_path):
         dest.write_bytes(b"fake qcow2")
         download_count[0] += 1
 
-    p = QemuProvider(runner=runner, work_dir=tmp_path, downloader=counting_downloader)
+    p = QemuProvider(
+        runner=runner, iso_bin="genisoimage", work_dir=tmp_path, downloader=counting_downloader
+    )
     url = "https://example.com/ubuntu.qcow2"
     p.provision("v1", "2cpu-2gb", "local", url, "k")
     p.provision("v2", "2cpu-2gb", "local", url, "k")
@@ -242,6 +296,191 @@ def test_qemu_provision_uses_local_image_directly(tmp_path):
 
     local_img = tmp_path / "local.qcow2"
     local_img.write_bytes(b"existing image")
-    p = QemuProvider(runner=runner, work_dir=tmp_path, downloader=counting_downloader)
+    p = QemuProvider(
+        runner=runner, iso_bin="genisoimage", work_dir=tmp_path, downloader=counting_downloader
+    )
     p.provision("v", "2cpu-2gb", "local", str(local_img), "k")
     assert download_count[0] == 0, "local image should not trigger a download"
+
+
+# ── Instance-type parsing ────────────────────────────────────────────────────
+
+
+def test_parse_instance_type_falls_back_for_unparseable():
+    """Strings that don't match ``<n>cpu-<m>gb`` fall back to (2, 4096)."""
+    smp, mem_mb = _parse_instance_type("test-size")
+    assert smp == 2, f"expected fallback smp=2, got {smp}"
+    assert mem_mb == 4096, f"expected fallback mem=4096, got {mem_mb}"
+
+
+def test_parse_instance_type_parses_cpu_and_memory():
+    """'4cpu-8gb' maps to smp=4, mem=8192 MB."""
+    smp, mem_mb = _parse_instance_type("4cpu-8gb")
+    assert smp == 4, f"expected smp=4, got {smp}"
+    assert mem_mb == 8192, f"expected mem=8192 MB, got {mem_mb}"
+
+
+# ── ISO binary discovery ─────────────────────────────────────────────────────
+
+
+def test_find_iso_builder_raises_when_none_found(monkeypatch, tmp_path):
+    """When no ISO builder is on PATH, FileNotFoundError is raised."""
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="No ISO builder found"):
+        _find_iso_builder()
+
+
+def test_find_iso_builder_returns_first_available(monkeypatch, tmp_path):
+    """When genisoimage is on PATH, its path is returned."""
+    fake_bin = tmp_path / "genisoimage"
+    fake_bin.write_text("#!/bin/sh\nexit 0\n")
+    fake_bin.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert _find_iso_builder() == str(fake_bin)
+
+
+def test_find_iso_builder_finds_xorrisofs(monkeypatch, tmp_path):
+    """xorrisofs is discovered when genisoimage/mkisofs are absent."""
+    fake_bin = tmp_path / "xorrisofs"
+    fake_bin.write_text("#!/bin/sh\nexit 0\n")
+    fake_bin.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert _find_iso_builder() == str(fake_bin)
+
+
+def test_find_iso_builder_falls_back_to_xorriso(monkeypatch, tmp_path):
+    """bare xorriso is discovered when no flag-compatible frontend exists."""
+    fake_bin = tmp_path / "xorriso"
+    fake_bin.write_text("#!/bin/sh\nexit 0\n")
+    fake_bin.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert _find_iso_builder() == str(fake_bin)
+
+
+def test_iso_build_prefix_adds_emulation_for_xorriso():
+    """xorriso needs -as mkisofs emulation; other binaries need nothing."""
+    assert _iso_build_prefix("xorriso") == ["-as", "mkisofs"], (
+        "xorriso must get the mkisofs emulation prefix"
+    )
+    assert _iso_build_prefix("/usr/bin/xorriso") == ["-as", "mkisofs"], (
+        "full path to xorriso must still be detected via basename"
+    )
+    assert _iso_build_prefix("genisoimage") == [], "genisoimage needs no prefix"
+    assert _iso_build_prefix("xorrisofs") == [], "xorrisofs needs no prefix"
+
+
+# ── Cloud-init seed build errors ─────────────────────────────────────────────
+
+
+def test_build_cloud_init_seed_raises_on_iso_build_failure(tmp_path):
+    """When genisoimage exits non-zero, a RuntimeError is raised."""
+    runner = _fake_runner(returncode=1, stderr="mkisofs: error")
+    with pytest.raises(RuntimeError, match="Failed to build cloud-init seed ISO"):
+        _build_cloud_init_seed("ssh-ed25519 k", tmp_path, runner, iso_bin="genisoimage")
+
+
+def test_build_cloud_init_seed_removes_stale_iso(tmp_path):
+    """A pre-existing cidata.iso is removed before rebuilding.
+
+    xorriso rejects overwriting an output ISO whose size differs with a
+    non-zero "size has changed" MISHAP, so reprovisioning the same VM name
+    must start from a clean ISO path.
+    """
+    runner = _fake_runner()
+    stale = tmp_path / "cidata" / "cidata.iso"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"stale iso")
+    _build_cloud_init_seed("ssh-ed25519 k", tmp_path, runner, iso_bin="genisoimage")
+    assert not stale.exists(), "stale ISO must be removed before rebuilding"
+
+
+# ── Provision / teardown error paths ─────────────────────────────────────────
+
+
+def _selective_runner(*, iso_ok: bool = True, qemu_ok: bool = True):
+    """Runner that succeeds/fails per command type, recording every call."""
+    calls: list[list[str]] = []
+
+    def runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        head = cmd[0] if cmd else ""
+        if head in ("genisoimage", "mkisofs", "xorrisofs", "xorriso"):
+            rc = 0 if iso_ok else 1
+        elif "qemu-system" in head:
+            rc = 0 if qemu_ok else 1
+        else:
+            rc = 0
+        return subprocess.CompletedProcess(cmd, rc, "", "" if rc == 0 else "error")
+
+    runner.calls = calls  # type: ignore[attr-defined]
+    return runner
+
+
+def test_provision_raises_when_qemu_fails_to_start():
+    """If the QEMU process exits non-zero, provision() raises RuntimeError."""
+    runner = _selective_runner(iso_ok=True, qemu_ok=False)
+    p = QemuProvider(runner=runner, iso_bin="genisoimage")
+    with pytest.raises(RuntimeError, match="QEMU failed to start VM"):
+        p.provision("dead-vm", "2cpu-2gb", "local", "/img.qcow2", "k")
+
+
+def test_teardown_handles_already_dead_process(monkeypatch, tmp_path):
+    """If the QEMU PID is already gone, teardown is a no-op (no raise).
+
+    os.kill on a dead PID raises ProcessLookupError, which teardown swallows.
+    """
+
+    def raise_gone(*_args: object) -> None:
+        raise ProcessLookupError()
+
+    monkeypatch.setattr("hermes_sandbox.qemu.os.kill", raise_gone)
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
+    vm = p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "k")
+    pidfile = tmp_path / "v" / "qemu.pid"
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("4242")
+    p.teardown(vm.id)  # must not raise even though the PID is gone
+    assert not pidfile.exists(), "teardown must still clean up the pidfile"
+    with pytest.raises(KeyError):
+        p.get(vm.id)
+
+
+def test_kill_pidfile_is_noop_for_missing_or_malformed(tmp_path):
+    """_kill_pidfile must never raise on a missing or bad pidfile."""
+    missing = tmp_path / "nope.pid"
+    _kill_pidfile(missing)  # no file — no raise, no error
+    malformed = tmp_path / "bad.pid"
+    malformed.write_text("not-a-number")
+    _kill_pidfile(malformed)  # non-int contents — no raise
+    assert malformed.exists(), "malformed pidfile is left untouched (not our process)"
+
+
+def test_kill_pidfile_signals_pid_and_removes_file(monkeypatch, tmp_path):
+    """_kill_pidfile SIGTERMs the recorded PID and removes the pidfile."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr("hermes_sandbox.qemu.os.kill", lambda pid, sig: killed.append((pid, sig)))
+    pidfile = tmp_path / "qemu.pid"
+    pidfile.write_text("7777")
+    _kill_pidfile(pidfile)
+    assert killed == [(7777, signal.SIGTERM)], "must SIGTERM the exact PID"
+    assert not pidfile.exists(), "pidfile must be removed after signalling"
+
+
+# ── Default subprocess helpers ───────────────────────────────────────────────
+
+
+def test_default_runner_runs_command_and_captures_result():
+    """_default_runner shells out and returns the CompletedProcess."""
+    ok = _default_runner(["/bin/true"])
+    assert ok.returncode == 0, "expected /bin/true to exit 0"
+    fail = _default_runner(["/bin/false"])
+    assert fail.returncode != 0, "expected /bin/false to exit non-zero"
+
+
+def test_default_downloader_downloads_file_url(tmp_path):
+    """_default_downloader copies a URL to the destination path."""
+    src = tmp_path / "source.img"
+    src.write_bytes(b"image-bytes")
+    dest = tmp_path / "out" / "downloaded.img"
+    _default_downloader(src.as_uri(), dest)
+    assert dest.read_bytes() == b"image-bytes", "downloaded content must match source"
