@@ -152,6 +152,30 @@ def test_on_session_end_noop_when_auto_teardown_zero(tmp_path, fake_key_factory,
     assert mgr.state_path.exists()
 
 
+def test_slash_list_shows_vms(tmp_path, fake_key_factory, monkeypatch):
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    mgr.ensure_vm()
+    out = hermes_sandbox._handle_slash("list")
+    assert out is not None
+    assert "dry-run-1" in out
+    assert "dry-run" in out
+
+
+def test_slash_list_empty_message(tmp_path, fake_key_factory, monkeypatch):
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    out = hermes_sandbox._handle_slash("list")
+    assert out is not None
+    assert "No sandbox VMs found" in out
+
+
+def test_slash_help_advertises_list():
+    out = hermes_sandbox._handle_slash("help")
+    assert out is not None
+    assert "list" in out
+
+
 def test_slash_status_none_when_no_manager(monkeypatch):
     out = hermes_sandbox._handle_slash("status")
     assert "Not configured" in out

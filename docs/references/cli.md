@@ -75,6 +75,19 @@ SANDBOX_PROVIDER=dry-run hermes sandbox teardown
 [sandbox] No VM to tear down.
 ```
 
+## List
+
+List all sandbox VMs on the cloud provider.  This queries the cloud API
+for VMs tagged `hermes-sandbox`, so it works across sessions and processes.
+
+```shell,script(name="list-none", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox list
+```
+
+```text,verify(script_name="list-none", stream=stdout)
+[sandbox] No sandbox VMs found.
+```
+
 ## Enable
 
 Set `terminal.backend=ssh` in config.yaml so Hermes' ssh terminal backend is

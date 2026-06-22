@@ -230,6 +230,7 @@ Subcommands:
   status      Show the current sandbox VM (or "none")
   provision   Provision/reuse a VM now (also happens on session start)
   teardown    Destroy the recorded sandbox VM
+  list        List all sandbox VMs on the cloud
   enable      Set terminal.backend=ssh in config.yaml (run once)
   help        This message
 
@@ -271,6 +272,18 @@ def _handle_slash(raw_args: str) -> str | None:
         ok = manager.teardown()
         return "[sandbox] VM torn down." if ok else "[sandbox] No VM to tear down."
 
+    if sub == "list":
+        vms = manager.list_vms()
+        if not vms:
+            return "[sandbox] No sandbox VMs found."
+        lines = ["[sandbox] Sandbox VMs:"]
+        for vm in vms:
+            state = "running" if vm.is_running() else vm.status
+            lines.append(
+                f"  {vm.id}  {vm.name}  {vm.provider}  {state}  {vm.preferred_ip()}  {vm.region}"
+            )
+        return "\n".join(lines)
+
     return f"Unknown subcommand: {sub}\n\n{_HELP}"
 
 
@@ -295,6 +308,7 @@ def _setup_cli(parser: argparse.ArgumentParser) -> None:
     sub.add_parser("status", help="Show the current sandbox VM")
     sub.add_parser("provision", help="Provision/reuse a VM now")
     sub.add_parser("teardown", help="Destroy the recorded sandbox VM")
+    sub.add_parser("list", help="List all sandbox VMs on the cloud")
     sub.add_parser("enable", help="Set terminal.backend=ssh in config.yaml")
     sub.add_parser("available", help="List registered providers")
 
@@ -323,7 +337,7 @@ def register(ctx: Any) -> None:
         "sandbox",
         handler=_handle_slash,
         description="Cloud-VM terminal sandbox: provision/status/teardown.",
-        args_hint="<status|provision|teardown|enable>",
+        args_hint="<status|provision|teardown|list|enable>",
     )
     ctx.register_cli_command(
         "sandbox",
