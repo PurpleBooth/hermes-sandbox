@@ -20,11 +20,11 @@ SANDBOX_PROVIDER=dry-run hermes sandbox status
 ## Provision the VM
 
 ```shell,script(name="provision", expected_exit_code=0)
-SANDBOX_PROVIDER=dry-run hermes sandbox provision
+SANDBOX_PROVIDER=dry-run hermes sandbox provision | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/IP/g'
 ```
 
 ```text,verify(script_name="provision", stream=stdout)
-[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+[sandbox] VM ready: UUID @ IP (dry-run)
 ```
 
 ## Check the VM status
@@ -33,13 +33,13 @@ After provisioning, `status` shows the VM details.  The timestamps vary
 between runs, so here we look at the stable fields:
 
 ```shell,script(name="status-after", expected_exit_code=0)
-SANDBOX_PROVIDER=dry-run hermes sandbox status | grep -E '"vm_id"|"provider"|"public_ip"'
+SANDBOX_PROVIDER=dry-run hermes sandbox status | grep -E '"vm_id"|"provider"|"public_ip"' | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/IP/g'
 ```
 
 ```text,verify(script_name="status-after", stream=stdout)
-  "vm_id": "dry-run-1",
+  "vm_id": "UUID",
   "provider": "dry-run",
-  "public_ip": "10.0.0.1",
+  "public_ip": "IP",
 ```
 
 ## Tear down the VM

@@ -70,11 +70,11 @@ Provision (or reuse) a sandbox VM. The dry-run provider needs no token, so
 you can try it right away:
 
 ```shell,script(name="readme-provision", expected_exit_code=0)
-SANDBOX_PROVIDER=dry-run hermes sandbox provision
+SANDBOX_PROVIDER=dry-run hermes sandbox provision | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/IP/g'
 ```
 
 ```text,verify(script_name="readme-provision", stream=stdout)
-[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+[sandbox] VM ready: UUID @ IP (dry-run)
 ```
 
 ## Check the status
@@ -82,13 +82,13 @@ SANDBOX_PROVIDER=dry-run hermes sandbox provision
 See the current sandbox VM:
 
 ```shell,script(name="readme-status", expected_exit_code=0)
-SANDBOX_PROVIDER=dry-run hermes sandbox status | grep -E '"vm_id"|"provider"|"public_ip"'
+SANDBOX_PROVIDER=dry-run hermes sandbox status | grep -E '"vm_id"|"provider"|"public_ip"' | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/IP/g'
 ```
 
 ```text,verify(script_name="readme-status", stream=stdout)
-  "vm_id": "dry-run-1",
+  "vm_id": "UUID",
   "provider": "dry-run",
-  "public_ip": "10.0.0.1",
+  "public_ip": "IP",
 ```
 
 ## List all sandbox VMs
@@ -108,11 +108,11 @@ SANDBOX_PROVIDER=dry-run hermes sandbox list
 If a VM is broken or unreachable, destroy it and provision a fresh one:
 
 ```shell,script(name="readme-recreate", expected_exit_code=0)
-SANDBOX_PROVIDER=dry-run hermes sandbox recreate
+SANDBOX_PROVIDER=dry-run hermes sandbox recreate | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/IP/g'
 ```
 
 ```text,verify(script_name="readme-recreate", stream=stdout)
-[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+[sandbox] VM ready: UUID @ IP (dry-run)
 ```
 
 ## Tear down

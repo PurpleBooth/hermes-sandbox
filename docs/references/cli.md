@@ -46,11 +46,11 @@ hermes sandbox status
 Provision (or reuse) a sandbox VM.  Returns the VM id, IP, and provider.
 
 ```shell,script(name="provision", expected_exit_code=0)
-SANDBOX_PROVIDER=dry-run hermes sandbox provision
+SANDBOX_PROVIDER=dry-run hermes sandbox provision | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/IP/g'
 ```
 
 ```text,verify(script_name="provision", stream=stdout)
-[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+[sandbox] VM ready: UUID @ IP (dry-run)
 ```
 
 ## Teardown
@@ -95,11 +95,11 @@ broken or unreachable — it tears down the old VM and creates a new one in
 its place.
 
 ```shell,script(name="recreate", expected_exit_code=0)
-SANDBOX_PROVIDER=dry-run hermes sandbox recreate
+SANDBOX_PROVIDER=dry-run hermes sandbox recreate | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/IP/g'
 ```
 
 ```text,verify(script_name="recreate", stream=stdout)
-[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+[sandbox] VM ready: UUID @ IP (dry-run)
 ```
 
 Clean up the VM created by recreate so it doesn't leak into other specs:
