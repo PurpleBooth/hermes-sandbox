@@ -36,11 +36,11 @@ Issues = "https://codeberg.org/PurpleBooth/hermes-sandbox/issues"
 Changelog = "https://codeberg.org/PurpleBooth/hermes-sandbox/src/branch/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11", "twine>=5", "hypothesis>=6"]
+dev = ["pytest>=7", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11", "twine>=5", "hypothesis>=6", "mutmut>=3"]
 
 # PEP 735 dependency groups — uv syncs these by default (no --extra needed).
 [dependency-groups]
-dev = ["pytest>=7", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11", "twine>=5", "hypothesis>=6"]
+dev = ["pytest>=7", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11", "twine>=5", "hypothesis>=6", "mutmut>=3"]
 
 [tool.setuptools]
 packages = ["hermes_sandbox"]
@@ -128,3 +128,18 @@ check_untyped_defs = true
 # lazily inside functions, so treat it as untyped/ignore.
 ignore_missing_imports = true
 exclude = ["tests/"]
+
+# ── mutmut (mutation testing) ───────────────────────────────────────────────
+# Mutate only the pure-logic modules where mutants are cheap and meaningful.
+# The provider concrete classes (hetzner/digitalocean/qemu) make subprocess /
+# network calls and are exercised via injected fakes, so they are excluded to
+# keep mutation runs fast and deterministic.
+[tool.mutmut]
+source_paths = [
+    "hermes_sandbox/models.py",
+    "hermes_sandbox/config.py",
+    "hermes_sandbox/state.py",
+    "hermes_sandbox/provider.py",
+]
+# Disable coverage collection during mutation runs — speed over metrics.
+runner = "uv run pytest -x -q --no-header --no-cov tests"

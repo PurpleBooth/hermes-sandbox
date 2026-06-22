@@ -59,6 +59,16 @@ coverage-html:
     uv run pytest --cov-report=html
     @echo "→ open htmlcov/index.html"
 
+# Mutation testing (mutmut): injects faults into the pure-logic modules to
+# measure how many the test suite actually catches. Slow — runs the whole
+# unit suite many times. See [tool.mutmut] in pyproject.toml for scope.
+mutation:
+    uv run mutmut run
+
+# Show survived / killed mutant summary after `just mutation`.
+mutation-results:
+    uv run mutmut results
+
 # Clean all caches and build artifacts
 clean:
     rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov *.egg-info build dist
