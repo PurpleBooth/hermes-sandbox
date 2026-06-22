@@ -42,6 +42,7 @@ class SandboxState:
     ssh_user: str
     created_at: float
     last_used: float
+    ssh_port: int = 22
 
     @classmethod
     def for_vm(cls, vm: VMInstance, ssh_user: str, now: float) -> SandboxState:
@@ -56,6 +57,7 @@ class SandboxState:
             ssh_user=ssh_user,
             created_at=now,
             last_used=now,
+            ssh_port=int(vm.extra.get("ssh_port", 22)),
         )
 
     def touched(self, now: float) -> SandboxState:

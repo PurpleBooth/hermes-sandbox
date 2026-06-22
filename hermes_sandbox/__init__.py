@@ -9,7 +9,7 @@ throwaway experiments in an isolated, ephemeral machine.
 
 Configuration (env vars; put secrets in ``~/.hermes/.env``):
 
-  SANDBOX_PROVIDER          hetzner | digitalocean | dry-run   (default: hetzner)
+  SANDBOX_PROVIDER          hetzner | digitalocean | dry-run | qemu   (default: hetzner)
   HCLOUD_TOKEN                 Hetzner Cloud API token  (hetzner)
   DIGITALOCEAN_TOKEN           DigitalOcean API token   (digitalocean)
                                (DO_API_TOKEN also accepted)
@@ -42,6 +42,7 @@ from . import digitalocean as _digitalocean  # noqa: F401
 # Import providers so their @register_provider decorators run on load.
 from . import dry_run as _dry_run  # noqa: F401
 from . import hetzner as _hetzner  # noqa: F401
+from . import qemu as _qemu  # noqa: F401
 from .config import SandboxConfig
 from .lifecycle import VMLifecycleManager
 from .provider import get_provider

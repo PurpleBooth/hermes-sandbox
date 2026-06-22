@@ -54,9 +54,9 @@ class SandboxConfig:
         )
 
     def is_configured(self) -> bool:
-        # A token is only required for real providers; the dry-run provider
-        # simulates provisioning in memory and needs no token.
-        return bool(self.token) or self.provider_name == "dry-run"
+        # A token is only required for real cloud providers; the dry-run and
+        # qemu providers run locally and need no token.
+        return bool(self.token) or self.provider_name in ("dry-run", "qemu")
 
 
 def _resolve_token(provider_name: str, env: dict[str, str]) -> str:

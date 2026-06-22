@@ -143,6 +143,11 @@ class VMLifecycleManager:
             "TERMINAL_SSH_HOST": host,
             "TERMINAL_SSH_USER": state.ssh_user or self.config.ssh_user,
             "TERMINAL_SSH_KEY": key_path,
+            **(
+                {"TERMINAL_SSH_PORT": str(state.ssh_port)}
+                if state.ssh_port != 22
+                else {}
+            ),
         }
 
     # -- core operations ---------------------------------------------------

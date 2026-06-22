@@ -8,10 +8,12 @@ them in your shell.
 
 | Variable | Default | Values |
 |---|---|---|
-| `SANDBOX_PROVIDER` | `hetzner` | `hetzner` \| `digitalocean` \| `dry-run` |
+| `SANDBOX_PROVIDER` | `hetzner` | `hetzner` \| `digitalocean` \| `dry-run` \| `qemu` |
 
 The `dry-run` provider is for testing — it provisions an in-memory VM and
-requires no token.
+requires no token.  The `qemu` provider runs VMs locally via QEMU — it
+needs no cloud token but requires `qemu-system-x86_64` installed and a
+local disk image (set `SANDBOX_IMAGE` to the qcow2 path).
 
 ## Cloud credentials
 
@@ -22,8 +24,8 @@ requires no token.
 | `DIGITALOCEAN_TOKEN` | digitalocean | DigitalOcean API token |
 | `DO_API_TOKEN` | digitalocean | Alias for `DIGITALOCEAN_TOKEN` |
 
-Only real providers require a token.  The `dry-run` provider is always
-configured.
+Only cloud providers require a token.  The `dry-run` and `qemu` providers
+are always configured.
 
 ## VM settings
 
