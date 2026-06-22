@@ -29,7 +29,8 @@ nonempty_text = st.text(alphabet=_safe_chars, min_size=1, max_size=40)
 # Env-var-name-safe text (identifier-ish).
 env_name = st.text(
     alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"), whitelist_characters="_-"),
-    min_size=1, max_size=30,
+    min_size=1,
+    max_size=30,
 )
 # IPv4-ish / IPv6-ish strings (we don't validate format, just exercise logic).
 ip_text = st.text(alphabet=_safe_chars, min_size=1, max_size=40)
@@ -85,7 +86,9 @@ def test_preferred_ip_falls_back_to_ipv4_when_no_ipv6(ipv4: str):
 @given(
     pairs=st.lists(
         st.tuples(env_name, st.text(alphabet=_safe_chars, max_size=20)),
-        min_size=1, max_size=5, unique_by=lambda kv: kv[0],
+        min_size=1,
+        max_size=5,
+        unique_by=lambda kv: kv[0],
     ),
 )
 def test_resolve_token_picks_first_non_empty(pairs):
@@ -159,8 +162,9 @@ def test_poll_until_always_raises_on_timeout():
     # A clock that is already past the deadline after the first check.
     ticks = iter([0.0, 1000.0])
     with pytest.raises(TimeoutError):
-        poll_until(lambda: False, interval=0, timeout=1,
-                   sleep=lambda _: None, clock=lambda: next(ticks))
+        poll_until(
+            lambda: False, interval=0, timeout=1, sleep=lambda _: None, clock=lambda: next(ticks)
+        )
 
 
 # ── SandboxState: typed persistence roundtrip ──────────────────────────────

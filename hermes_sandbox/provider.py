@@ -142,9 +142,7 @@ def get_provider_class(name: str) -> type[CloudProvider]:
     try:
         return _REGISTRY[name]
     except KeyError as exc:
-        raise KeyError(
-            f"Unknown cloud provider {name!r}. Registered: {sorted(_REGISTRY)}"
-        ) from exc
+        raise KeyError(f"Unknown cloud provider {name!r}. Registered: {sorted(_REGISTRY)}") from exc
 
 
 def available_providers() -> list[str]:

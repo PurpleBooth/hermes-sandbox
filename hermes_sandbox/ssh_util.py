@@ -35,13 +35,20 @@ def generate_keypair(key_dir: Path, name: str = "hermes-sandbox") -> KeyPair:
         ssh_keygen = shutil.which("ssh-keygen") or "ssh-keygen"
         cmd = [
             ssh_keygen,
-            "-t", "ed25519",
-            "-N", "",
-            "-C", "hermes-sandbox",
-            "-f", str(private),
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            "hermes-sandbox",
+            "-f",
+            str(private),
         ]
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -79,18 +86,27 @@ def wait_for_ssh(
     while time.monotonic() < deadline:
         cmd = [
             ssh,
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=5",
-            "-o", "IdentitiesOnly=yes",
-            "-i", key_path,
-            "-p", str(port),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ConnectTimeout=5",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-i",
+            key_path,
+            "-p",
+            str(port),
             f"{user}@{host}",
             "true",
         ]
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=15,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=15,
                 stdin=subprocess.DEVNULL,
             )
             if result.returncode == 0:

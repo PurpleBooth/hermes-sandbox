@@ -95,7 +95,9 @@ class HetznerProvider(RestCloudProvider):
                 return str(key["name"])
         # Upload it.
         self._request(
-            "POST", "/ssh_keys", self.token,
+            "POST",
+            "/ssh_keys",
+            self.token,
             body={"name": name, "public_key": public_key},
         )
         return name

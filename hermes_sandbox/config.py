@@ -67,6 +67,7 @@ def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
     """
     try:
         from .provider import get_provider_class
+
         return get_provider_class(provider_name).resolve_token(env)
     except KeyError:
         return env.get("SANDBOX_TOKEN") or ""
@@ -80,6 +81,7 @@ def _provider_defaults(provider_name: str) -> dict[str, str]:
     the provider isn't registered yet.
     """
     from .provider import CloudProvider, get_provider_class
+
     try:
         cls = get_provider_class(provider_name)
     except KeyError:

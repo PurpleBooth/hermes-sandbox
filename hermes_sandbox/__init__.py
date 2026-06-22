@@ -60,6 +60,7 @@ _sessions: dict[str, VMLifecycleManager] = {}
 def _get_hermes_home() -> Path:
     """Return the Hermes home directory (wraps the hermes_constants import)."""
     from hermes_constants import get_hermes_home
+
     return Path(get_hermes_home())
 
 
@@ -138,6 +139,7 @@ def _collect_known_vm_ids(manager: VMLifecycleManager) -> set[str]:
         for state_file in sessions_dir.glob("*/state.json"):
             try:
                 import json
+
                 data = json.loads(state_file.read_text(encoding="utf-8"))
                 vm_id = data.get("vm_id")
                 if vm_id:
@@ -157,7 +159,8 @@ def _apply_ssh_env(manager: VMLifecycleManager) -> None:
     os.environ.setdefault("TERMINAL_SSH_PERSISTENT", "true")
     logger.info(
         "sandbox: terminal backend -> ssh %s@%s",
-        env["TERMINAL_SSH_USER"], env["TERMINAL_SSH_HOST"],
+        env["TERMINAL_SSH_USER"],
+        env["TERMINAL_SSH_HOST"],
     )
 
 
@@ -174,6 +177,7 @@ def _invalidate_cached_terminal_env(task_id: str = "default") -> None:
     """
     try:
         from tools.terminal_tool import cleanup_vm
+
         cleanup_vm(task_id)
         logger.debug("sandbox: cleared cached terminal environment for %r", task_id)
     except Exception as exc:
