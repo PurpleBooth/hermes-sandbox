@@ -59,8 +59,12 @@ def test_wait_for_ssh_returns_false_on_closed_port(tmp_path):
 
     # 127.0.0.1:9 (discard) is almost always closed.  Short timeout + interval.
     result = wait_for_ssh(
-        host="127.0.0.1", user="root", key_path=kp.private_path,
-        port=9, timeout=2, interval=0.1,
+        host="127.0.0.1",
+        user="root",
+        key_path=kp.private_path,
+        port=9,
+        timeout=2,
+        interval=0.1,
     )
     assert result is False
 

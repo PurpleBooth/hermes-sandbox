@@ -29,8 +29,7 @@ class ApiError(RuntimeError):
         self.status_code = status_code
         self.detail = detail
         super().__init__(
-            f"{method} {path} failed: HTTP {status_code}"
-            + (f" {detail}" if detail else "")
+            f"{method} {path} failed: HTTP {status_code}" + (f" {detail}" if detail else "")
         )
 
 

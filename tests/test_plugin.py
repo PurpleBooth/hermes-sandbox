@@ -16,7 +16,9 @@ def _make_manager(tmp_path, fake_key_factory):
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
     return VMLifecycleManager(
-        provider=provider, config=config, hermes_home=hermes_home,
+        provider=provider,
+        config=config,
+        hermes_home=hermes_home,
         key_factory=fake_key_factory,
     )
 
@@ -29,7 +31,9 @@ def _reset_manager(monkeypatch):
     yield
 
 
-def test_on_session_start_isolated_creates_per_session_state(tmp_path, fake_key_factory, monkeypatch):
+def test_on_session_start_isolated_creates_per_session_state(
+    tmp_path, fake_key_factory, monkeypatch
+):
     """In isolated mode, each session gets its own state file and VM."""
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
@@ -86,8 +90,8 @@ def test_on_session_end_isolated_tears_down_session_vm(tmp_path, fake_key_factor
 
     hermes_sandbox._on_session_end(session_id="s1")
 
-    assert not s1_state.exists()   # s1 torn down
-    assert s2_state.exists()       # s2 still running
+    assert not s1_state.exists()  # s1 torn down
+    assert s2_state.exists()  # s2 still running
 
 
 def test_on_session_start_sets_ssh_env(tmp_path, fake_key_factory, monkeypatch):
@@ -97,6 +101,7 @@ def test_on_session_start_sets_ssh_env(tmp_path, fake_key_factory, monkeypatch):
     hermes_sandbox._on_session_start(session_id="s1")
 
     import os
+
     assert os.environ["TERMINAL_ENV"] == "ssh"
     assert os.environ["TERMINAL_SSH_USER"] == "root"
     assert os.environ["TERMINAL_SSH_HOST"]  # set to the VM's IP
@@ -108,6 +113,7 @@ def test_on_session_start_failopen_when_unconfigured(monkeypatch):
     assert hermes_sandbox._manager_or_build() is None
     # Must not raise, must not touch TERMINAL_ENV.
     import os
+
     os.environ.pop("TERMINAL_ENV", None)
     hermes_sandbox._on_session_start(session_id="s1")
     assert "TERMINAL_ENV" not in os.environ
@@ -118,10 +124,12 @@ def test_on_session_start_failopen_on_provision_error(tmp_path, fake_key_factory
 
     def boom():
         raise RuntimeError("cloud is down")
+
     monkeypatch.setattr(mgr, "ensure_vm", boom)
     monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
 
     import os
+
     os.environ.pop("TERMINAL_ENV", None)
     # Must not raise.
     hermes_sandbox._on_session_start(session_id="s1")
@@ -130,12 +138,14 @@ def test_on_session_start_failopen_on_provision_error(tmp_path, fake_key_factory
 
 def test_on_session_end_teardowns_when_auto(tmp_path, fake_key_factory, monkeypatch):
     provider = DryRunProvider()
-    config = SandboxConfig(provider_name="dry-run", token="", ssh_user="root",
-                           auto_teardown_seconds=30)
+    config = SandboxConfig(
+        provider_name="dry-run", token="", ssh_user="root", auto_teardown_seconds=30
+    )
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
-    mgr = VMLifecycleManager(provider=provider, config=config,
-                             hermes_home=hermes_home, key_factory=fake_key_factory)
+    mgr = VMLifecycleManager(
+        provider=provider, config=config, hermes_home=hermes_home, key_factory=fake_key_factory
+    )
     monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
     mgr.ensure_vm()
     assert mgr.state_path.exists()
@@ -260,10 +270,13 @@ def test_register_wires_hooks_and_commands(tmp_path, fake_key_factory):
     class FakeCtx:
         def register_hook(self, name, cb):
             registered["hooks"].append(name)
+
         def register_command(self, name, handler, description="", args_hint=""):
             registered["commands"].append(name)
-        def register_cli_command(self, name, help="", setup_fn=None,
-                                 handler_fn=None, description=""):
+
+        def register_cli_command(
+            self, name, help="", setup_fn=None, handler_fn=None, description=""
+        ):
             registered["cli"].append(name)
 
     hermes_sandbox.register(FakeCtx())

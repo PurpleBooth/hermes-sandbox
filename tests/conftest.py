@@ -20,9 +20,16 @@ if str(REPO_ROOT) not in sys.path:
 def _clean_terminal_env(monkeypatch):
     """Strip any leftover TERMINAL_* env so tests start from a clean slate."""
     for k in list(os.environ):
-        if k.startswith("TERMINAL_") or k.startswith("SANDBOX") or k in {
-            "HCLOUD_TOKEN", "DIGITALOCEAN_TOKEN", "DO_API_TOKEN",
-        }:
+        if (
+            k.startswith("TERMINAL_")
+            or k.startswith("SANDBOX")
+            or k
+            in {
+                "HCLOUD_TOKEN",
+                "DIGITALOCEAN_TOKEN",
+                "DO_API_TOKEN",
+            }
+        ):
             monkeypatch.delenv(k, raising=False)
     yield
 

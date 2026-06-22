@@ -10,8 +10,7 @@ from hermes_sandbox.dry_run import DryRunProvider
 from hermes_sandbox.lifecycle import VMLifecycleManager
 
 
-def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None,
-                 clock=None):
+def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None, clock=None):
     provider = provider or DryRunProvider()
     config = config or SandboxConfig(provider_name="dry-run", token="", ssh_user="root")
     hermes_home = tmp_path / ".hermes"
@@ -149,10 +148,10 @@ def test_maybe_auto_teardown_respects_config(tmp_path, fake_key_factory):
 
     # >0 -> tears down.
     provider2 = DryRunProvider()
-    cfg = SandboxConfig(provider_name="dry-run", token="", ssh_user="root",
-                        auto_teardown_seconds=60)
-    mgr2 = make_manager(tmp_path, provider=provider2, config=cfg,
-                        fake_key_factory=fake_key_factory)
+    cfg = SandboxConfig(
+        provider_name="dry-run", token="", ssh_user="root", auto_teardown_seconds=60
+    )
+    mgr2 = make_manager(tmp_path, provider=provider2, config=cfg, fake_key_factory=fake_key_factory)
     mgr2.ensure_vm()
     assert mgr2.maybe_auto_teardown() is True
     assert not mgr2.state_path.exists()
@@ -227,9 +226,16 @@ def test_state_repository_roundtrip(tmp_path):
     assert repo.load() is None  # nothing yet
 
     state = SandboxState(
-        vm_id="1", provider="dry-run", name="n", region="r", public_ip="1.2.3.4",
-        public_ipv6="", ssh_host="1.2.3.4", ssh_user="root",
-        created_at=1.0, last_used=2.0,
+        vm_id="1",
+        provider="dry-run",
+        name="n",
+        region="r",
+        public_ip="1.2.3.4",
+        public_ipv6="",
+        ssh_host="1.2.3.4",
+        ssh_user="root",
+        created_at=1.0,
+        last_used=2.0,
     )
     repo.save(state)
     loaded = repo.load()
@@ -261,8 +267,11 @@ def test_manager_accepts_injected_state_repo(tmp_path, fake_key_factory):
     provider = DryRunProvider()
     config = SandboxConfig(provider_name="dry-run", token="", ssh_user="root")
     mgr = VMLifecycleManager(
-        provider=provider, config=config, hermes_home=tmp_path / ".hermes",
-        key_factory=fake_key_factory, state_repo=InMemoryRepo(),
+        provider=provider,
+        config=config,
+        hermes_home=tmp_path / ".hermes",
+        key_factory=fake_key_factory,
+        state_repo=InMemoryRepo(),
     )
     vm = mgr.ensure_vm()
     assert vm.is_running()
@@ -404,9 +413,17 @@ def test_sandboxstatus_is_frozen():
     from hermes_sandbox.lifecycle import SandboxStatus
 
     st = SandboxStatus(
-        vm_id="1", provider="dry-run", name="n", region="r", public_ip="1.2.3.4",
-        public_ipv6="", ssh_host="1.2.3.4", ssh_user="root",
-        created_at=0.0, last_used=0.0, alive=True,
+        vm_id="1",
+        provider="dry-run",
+        name="n",
+        region="r",
+        public_ip="1.2.3.4",
+        public_ipv6="",
+        ssh_host="1.2.3.4",
+        ssh_user="root",
+        created_at=0.0,
+        last_used=0.0,
+        alive=True,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         st.alive = False  # type: ignore[misc]
