@@ -20,6 +20,8 @@ Configuration (env vars; put secrets in ``~/.hermes/.env``):
   SANDBOX_NAME              default: hermes-sandbox
   SANDBOX_AUTO_TEARDOWN_SECONDS  0 = keep VM across sessions (default);
                                     >0 = tear down on session end
+  SANDBOX_MODE              shared (default) = one VM for all sessions;
+                                    isolated = one VM per session
 
 The plugin leaves ``terminal.backend`` as ``ssh`` in config.yaml (set via
 ``hermes sandbox enable``) and only manages the SSH connection details
@@ -32,6 +34,7 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from . import digitalocean as _digitalocean  # noqa: F401
@@ -46,28 +49,57 @@ from .provider import get_provider
 logger = logging.getLogger(__name__)
 
 # Module-level cache of the lifecycle manager for the current process.
-# Built lazily in on_session_start so a missing config doesn't break
-# plugin load (which happens before .env is necessarily loaded).
+# In shared mode this is the singleton; in isolated mode the per-session
+# managers live in ``_sessions`` and this is used only by slash/CLI commands.
 _manager: VMLifecycleManager | None = None
+# Per-session managers for isolated mode, keyed by session_id.
+_sessions: dict[str, VMLifecycleManager] = {}
 
 
-def _build_manager() -> VMLifecycleManager | None:
-    """Construct a VMLifecycleManager from the current environment.
+def _get_hermes_home() -> Path:
+    """Return the Hermes home directory (wraps the hermes_constants import)."""
+    from hermes_constants import get_hermes_home
+    return Path(get_hermes_home())
+
+
+def _build_config() -> SandboxConfig | None:
+    """Build a SandboxConfig from the current environment.
 
     Returns None if the plugin is not configured (no token for a real
-    provider), so on_session_start can no-op cleanly.
+    provider), so hooks can no-op cleanly.
     """
     config = SandboxConfig.from_env(dict(os.environ))
     if not config.is_configured():
+        return None
+    return config
+
+
+def _build_manager() -> VMLifecycleManager | None:
+    """Construct a shared VMLifecycleManager from the current environment."""
+    config = _build_config()
+    if config is None:
         return None
     try:
         provider = get_provider(config.provider_name, token=config.token)
     except Exception as exc:
         logger.warning("sandbox: cannot build provider %r: %s", config.provider_name, exc)
         return None
-    from hermes_constants import get_hermes_home
+    return VMLifecycleManager(provider=provider, config=config, hermes_home=_get_hermes_home())
 
-    return VMLifecycleManager(provider=provider, config=config, hermes_home=get_hermes_home())
+
+def _build_session_manager(session_id: str, config: SandboxConfig) -> VMLifecycleManager:
+    """Construct a per-session VMLifecycleManager for isolated mode."""
+    from .state import JsonStateRepository
+
+    provider = get_provider(config.provider_name, token=config.token)
+    hermes_home = _get_hermes_home()
+    session_dir = hermes_home / "sandbox" / "sessions" / session_id
+    return VMLifecycleManager(
+        provider=provider,
+        config=config,
+        hermes_home=hermes_home,
+        state_repo=JsonStateRepository(session_dir),
+    )
 
 
 def _manager_or_build() -> VMLifecycleManager | None:
@@ -90,28 +122,28 @@ def _apply_ssh_env(manager: VMLifecycleManager) -> None:
     )
 
 
-def _invalidate_cached_terminal_env() -> None:
+def _invalidate_cached_terminal_env(task_id: str = "default") -> None:
     """Clear Hermes' cached terminal environment so the next ``terminal`` call
     creates a fresh SSH connection.
 
     ``terminal_tool._active_environments`` caches the SSH environment by
-    ``task_id`` (default ``"default"``).  In a long-running process (gateway,
-    dashboard) that handles multiple sessions, a stale SSH connection from a
-    previous session would be reused even after the plugin updates
-    ``TERMINAL_SSH_*`` env vars.  Clearing the cache forces the next terminal
-    call to re-read the env vars and dial the new VM.
+    ``task_id``.  In a long-running process (gateway, dashboard) that handles
+    multiple sessions, a stale SSH connection from a previous session would be
+    reused even after the plugin updates ``TERMINAL_SSH_*`` env vars.  Clearing
+    the cache forces the next terminal call to re-read the env vars and dial
+    the new VM.
     """
     try:
         from tools.terminal_tool import cleanup_vm
-        cleanup_vm("default")
-        logger.debug("sandbox: cleared cached terminal environment for 'default'")
+        cleanup_vm(task_id)
+        logger.debug("sandbox: cleared cached terminal environment for %r", task_id)
     except Exception as exc:
         logger.debug("sandbox: could not clear cached terminal env: %s", exc)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
 # Hooks
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
 
 
 def _on_session_start(
@@ -125,7 +157,27 @@ def _on_session_start(
     Fail-open: any error is logged and the session continues with the
     host's existing terminal backend.  We never crash a user's session
     because the sandbox couldn't boot.
+
+    In ``shared`` mode (default) all sessions reuse one VM — the singleton
+    manager.  In ``isolated`` mode each session gets its own VM with its
+    own state file under ``sessions/<session_id>/``.
     """
+    task_id = session_id or "default"
+
+    # Isolated mode: build a per-session manager for this session only.
+    config = _build_config()
+    if config is not None and config.mode == "isolated" and session_id:
+        try:
+            session_mgr = _build_session_manager(session_id, config)
+            _sessions[session_id] = session_mgr
+            session_mgr.ensure_vm()
+            _apply_ssh_env(session_mgr)
+            _invalidate_cached_terminal_env(task_id)
+        except Exception as exc:
+            logger.warning("sandbox: session-start provisioning failed: %s", exc)
+        return
+
+    # Shared mode: use the singleton manager (injected by tests or built from env).
     manager = _manager_or_build()
     if manager is None:
         logger.debug("sandbox: not configured — skipping session-start provisioning")
@@ -133,7 +185,7 @@ def _on_session_start(
     try:
         manager.ensure_vm()
         _apply_ssh_env(manager)
-        _invalidate_cached_terminal_env()
+        _invalidate_cached_terminal_env(task_id)
     except Exception as exc:
         logger.warning("sandbox: session-start provisioning failed: %s", exc)
 
@@ -144,7 +196,20 @@ def _on_session_end(
     interrupted: bool = False,
     **_: Any,
 ) -> None:
-    """Tear down the sandbox if auto-teardown is configured."""
+    """Tear down the sandbox if auto-teardown is configured.
+
+    In ``isolated`` mode, tears down only the ending session's VM.  In
+    ``shared`` mode, tears down the shared VM (first session to end wins).
+    """
+    if session_id and session_id in _sessions:
+        session_mgr = _sessions.pop(session_id)
+        try:
+            session_mgr.maybe_auto_teardown()
+        except Exception as exc:
+            logger.warning("sandbox: session-end teardown failed: %s", exc)
+        return
+
+    # Shared mode: use the singleton manager.
     manager = _manager_or_build()
     if manager is None:
         return

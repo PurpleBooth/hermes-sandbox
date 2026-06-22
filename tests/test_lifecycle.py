@@ -57,6 +57,23 @@ def test_config_from_env_digitalocean_defaults(monkeypatch):
     assert cfg.instance_type == "s-2vcpu-4gb"
 
 
+def test_config_from_env_mode_defaults_to_shared(monkeypatch):
+    """Without SANDBOX_MODE, the default is shared (one VM for all sessions)."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "hetzner")
+    monkeypatch.setenv("HCLOUD_TOKEN", "tok")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.mode == "shared"
+
+
+def test_config_from_env_mode_isolated(monkeypatch):
+    """SANDBOX_MODE=isolated gives each session its own VM."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "hetzner")
+    monkeypatch.setenv("HCLOUD_TOKEN", "tok")
+    monkeypatch.setenv("SANDBOX_MODE", "isolated")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.mode == "isolated"
+
+
 def test_config_not_configured_without_token():
     cfg = SandboxConfig(provider_name="hetzner", token="")
     assert not cfg.is_configured()
