@@ -70,16 +70,12 @@ class DigitalOceanProvider(RestCloudProvider):
     default_instance_type = "s-2vcpu-4gb"
 
     def _delete_path(self, vm_id: str) -> str:
+        """Return the REST path for deleting a droplet by id."""
         return f"/droplets/{vm_id}"
 
-    # CloudProvider maps "running" to is_running(); DO uses "active".
-    # Override the status normalisation by reusing VMInstance._RUNNING_STATUSES
-    # via a thin adapter: we translate "active" -> "running" in _to_vm? No —
-    # cleaner to extend the running set.  We do that by post-processing.
-
     def _to_vm_running_aware(self, droplet: dict[str, Any]) -> VMInstance:
+        """Map a droplet dict to a VMInstance, normalising DO 'active' to 'running'."""
         vm = _to_vm(droplet)
-        # DO uses "active"; normalise so VMInstance.is_running() is True.
         if vm.status == "active":
             vm = replace(vm, status="running")
         return vm
@@ -95,6 +91,7 @@ class DigitalOceanProvider(RestCloudProvider):
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
     ) -> VMInstance:
+        """Create a droplet and block until it is active with a public IP."""
         key_id = self._ensure_ssh_key(ssh_public_key)
         body = {
             "name": name,
@@ -132,30 +129,30 @@ class DigitalOceanProvider(RestCloudProvider):
         return vm
 
     def get(self, vm_id: str) -> VMInstance:
+        """Return the current description of a droplet by id."""
         resp = self._request("GET", f"/droplets/{vm_id}", self.token)
         return self._to_vm_running_aware(resp.get("droplet", {}))
 
     def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
-        # DigitalOcean tags carry no value component — the tag name is the label
-        # key.  Query by the caller's label_key so a non-default tag is honoured.
+        """List droplets tagged with ``label_key`` (value is ignored — DO tags have no value)."""
         resp = self._request("GET", f"/droplets?tag_name={label_key}", self.token)
         return [self._to_vm_running_aware(d) for d in resp.get("droplets", [])]
 
     # -- helpers -----------------------------------------------------------
 
-    def _ensure_ssh_key(self, public_key: str, name: str = "hermes-sandbox") -> str:
-        """Upload the public key (idempotent) and return its DO key id (str)."""
+    def _ensure_ssh_key(self, public_key: str, name: str = "hermes-sandbox") -> int:
+        """Upload the public key (idempotent) and return its DO key id as an int."""
         try:
             listing = self._request("GET", "/account/keys", self.token)
         except ApiError:
             listing = {"ssh_keys": []}
         for key in listing.get("ssh_keys", []):
             if key.get("name") == name or key.get("public_key", "").strip() == public_key:
-                return str(key["id"])
+                return int(key["id"])
         resp = self._request(
             "POST",
             "/account/keys",
             self.token,
             body={"name": name, "public_key": public_key},
         )
-        return str(resp.get("ssh_key", {}).get("id", ""))
+        return int(resp.get("ssh_key", {}).get("id", 0))

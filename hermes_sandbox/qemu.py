@@ -21,6 +21,7 @@ Registered as ``qemu``; select it with ``SANDBOX_PROVIDER=qemu``.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -202,6 +203,7 @@ class QemuProvider(CloudProvider):
         work_dir: Path | None = None,
         downloader: ImageDownloader | None = None,
         iso_bin: str | None = None,
+        enable_kvm: bool = True,
     ) -> None:
         # ``token`` is accepted (and ignored) so ``get_provider(name, …)``
         # works uniformly across all providers.
@@ -210,6 +212,7 @@ class QemuProvider(CloudProvider):
         self._work_dir = work_dir or Path(tempfile.gettempdir()) / "hermes-sandbox"
         self._downloader: ImageDownloader = downloader or _default_downloader
         self._iso_bin = iso_bin  # resolved lazily via _find_iso_builder() if None
+        self._enable_kvm = enable_kvm
         self._vms: dict[str, VMInstance] = {}
 
     def _next_ssh_port(self) -> int:
@@ -258,11 +261,43 @@ class QemuProvider(CloudProvider):
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
     ) -> VMInstance:
+        """Provision a local QEMU VM and return its :class:`VMInstance` description.
+
+        Downloads the base image (if a URL), creates a per-VM qcow2 overlay so
+        concurrent VMs never share a writable backing file, builds the
+        cloud-init seed ISO for SSH-key injection, launches QEMU in daemon
+        mode, and persists VM metadata to ``vm.json`` so that a separate
+        process can discover the VM via :meth:`get` / :meth:`list_by_label`.
+        """
         smp, mem_mb = _parse_instance_type(instance_type)
         ssh_port = self._next_ssh_port()
 
         # Resolve the image: download if it's a URL, use local path as-is.
-        local_image = self._resolve_image(image)
+        base_image = self._resolve_image(image)
+
+        # Create a per-VM qcow2 overlay backed by the (possibly cached) base
+        # image.  Without this, two VMs provisioned from the same default URL
+        # would both write to the shared cached qcow2 and corrupt it.
+        vm_dir = self._work_dir / name
+        vm_dir.mkdir(parents=True, exist_ok=True)
+        overlay_path = vm_dir / "disk.qcow2"
+        result = self._runner(
+            [
+                "qemu-img",
+                "create",
+                "-f",
+                "qcow2",
+                "-b",
+                base_image,
+                "-F",
+                "qcow2",
+                str(overlay_path),
+            ]
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"qemu-img failed to create overlay for VM {name!r}: {result.stderr.strip()}"
+            )
 
         # Build the cloud-init NoCloud seed ISO for SSH key injection.
         seed_iso = _build_cloud_init_seed(
@@ -271,8 +306,12 @@ class QemuProvider(CloudProvider):
 
         # QEMU records its daemon PID here so teardown can SIGTERM it directly.
         pidfile = self._work_dir / name / "qemu.pid"
-        cmd = [
+        cmd: list[str] = [
             self.qemu_bin,
+        ]
+        if self._enable_kvm:
+            cmd.append("-enable-kvm")
+        cmd += [
             "-name",
             name,
             "-m",
@@ -280,7 +319,7 @@ class QemuProvider(CloudProvider):
             "-smp",
             str(smp),
             "-drive",
-            f"file={local_image},format=qcow2,if=virtio",
+            f"file={overlay_path},format=qcow2,if=virtio",
             "-drive",
             f"file={seed_iso},format=raw,if=virtio,readonly=on",
             "-netdev",
@@ -315,26 +354,84 @@ class QemuProvider(CloudProvider):
             },
         )
         self._vms[vm.id] = vm
+        self._persist_vm(vm)
         logger.info("qemu: started VM %s (ssh port %d)", vm.id, ssh_port)
         return vm
 
     def get(self, vm_id: str) -> VMInstance:
-        if vm_id not in self._vms:
+        """Return the :class:`VMInstance` for ``vm_id``.
+
+        Reads from the in-memory cache first, then falls back to the persisted
+        ``vm.json`` so that a **separate process** (e.g. ``hermes sandbox
+        status``) can look up a VM it never provisioned in memory.
+        Raises :class:`KeyError` if the VM is unknown to this provider.
+        """
+        if vm_id in self._vms:
+            return self._vms[vm_id]
+        vm = self._load_vm(vm_id)
+        if vm is None:
             raise KeyError(vm_id)
-        return self._vms[vm_id]
+        self._vms[vm_id] = vm
+        return vm
 
     def teardown(self, vm_id: str) -> None:
-        # Drop the in-memory entry if present (same-process usage).  ``hermes
-        # sandbox teardown`` is a separate process, so the registry is usually
-        # empty here — the VM is found via its deterministic pidfile path
-        # (``work_dir/<name>/qemu.pid``), which survives across processes.
+        """Tear down a VM: SIGTERM the QEMU process and remove all on-disk state.
+
+        Removes the in-memory cache entry, kills the PID recorded in the
+        pidfile, then cleans up the per-VM directory (overlay, seed ISO,
+        ``vm.json``, console log).  A missing VM is a no-op, so teardown is
+        safe to call from a separate process that has no in-memory registry.
+        """
         self._vms.pop(vm_id, None)
         _kill_pidfile(self._work_dir / vm_id / "qemu.pid")
+        vm_dir = self._work_dir / vm_id
+        if vm_dir.exists():
+            shutil.rmtree(vm_dir, ignore_errors=True)
         logger.info("qemu: tore down VM %s", vm_id)
 
     def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
-        return [
-            vm
-            for vm in self._vms.values()
-            if vm.extra.get("labels", {}).get(label_key) == label_value
-        ]
+        """Return all VMs (in-memory or persisted) with ``label_key=label_value``.
+
+        Scans ``vm.json`` files across the work directory so VMs created by
+        other processes are discovered as well.
+        """
+        seen: set[str] = set()
+        results: list[VMInstance] = []
+        for vm in self._all_known_vms():
+            if vm.id in seen:
+                continue
+            seen.add(vm.id)
+            if vm.extra.get("labels", {}).get(label_key) == label_value:
+                results.append(vm)
+        return results
+
+    # -- Internal helpers -------------------------------------------------
+
+    def _vm_dir(self, name: str) -> Path:
+        """Return the per-VM directory under the work directory."""
+        return self._work_dir / name
+
+    def _persist_vm(self, vm: VMInstance) -> None:
+        """Write VM metadata to ``work_dir/<name>/vm.json`` for cross-process lookup."""
+        vm_dir = self._vm_dir(vm.id)
+        vm_dir.mkdir(parents=True, exist_ok=True)
+        (vm_dir / "vm.json").write_text(json.dumps(vm.to_dict(), indent=2, sort_keys=True))
+
+    def _load_vm(self, name: str) -> VMInstance | None:
+        """Read a single VM's metadata from ``vm.json``, or ``None`` if absent."""
+        vm_file = self._vm_dir(name) / "vm.json"
+        if not vm_file.exists():
+            return None
+        return VMInstance.from_dict(json.loads(vm_file.read_text()))
+
+    def _all_known_vms(self) -> list[VMInstance]:
+        """Return all VMs known in-memory plus all persisted to ``vm.json`` files."""
+        vms_by_id: dict[str, VMInstance] = dict(self._vms)
+        for vm_json in self._work_dir.glob("*/vm.json"):
+            try:
+                vm = VMInstance.from_dict(json.loads(vm_json.read_text()))
+            except (OSError, ValueError):
+                logger.debug("qemu: skipping unreadable vm.json at %s", vm_json)
+                continue
+            vms_by_id.setdefault(vm.id, vm)
+        return list(vms_by_id.values())
