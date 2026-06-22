@@ -72,6 +72,13 @@ jobs:
           chmod +x ~/.local/bin/specdown
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # The specdown specs exercise the real `hermes sandbox` CLI, so Hermes
+      # itself must be installed on the runner.
+      - name: Install Hermes
+        run: |
+          curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       # Cloud tokens are forwarded to the test harness so the Hetzner and
       # DigitalOcean task specs can provision real VMs.  When a token secret
       # is absent (e.g. on a fork PR), the harness skips that provider's spec.
