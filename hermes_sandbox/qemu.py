@@ -7,9 +7,11 @@ host-forwarded port (QEMU user-mode networking).
 The provider starts QEMU in daemon mode (``-daemonize``) so the VM runs in
 the background.  The SSH public key is injected via a cloud-init NoCloud
 seed disk: a small CIDATA ISO built with ``xorriso`` (or ``genisoimage`` /
-``mkisofs``) containing ``user-data`` and ``meta-data``.  The SSH port is stored in
-``VMInstance.extra["ssh_port"]`` so the lifecycle manager can emit
-``TERMINAL_SSH_PORT``.
+``mkisofs``) containing ``user-data`` and ``meta-data``.  The ``user-data``
+creates a ``hermes`` user with passwordless sudo and the injected SSH key,
+so the plugin connects as ``hermes`` rather than ``root``.  The SSH port
+is stored in ``VMInstance.extra["ssh_port"]`` so the lifecycle manager can
+emit ``TERMINAL_SSH_PORT``.
 
 If the image path is a URL (the default is the Ubuntu 24.04 cloud image),
 it is downloaded to a local cache on first use and reused thereafter.
@@ -52,8 +54,12 @@ DEFAULT_UBUNTU_IMAGE_URL = (
 
 _CLOUD_INIT_USER_DATA = """\
 #cloud-config
-ssh_authorized_keys:
-  - {public_key}
+users:
+  - name: hermes
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - {public_key}
 """
 
 _CLOUD_INIT_META_DATA = "instance-id: hermes-sandbox\nlocal-hostname: sandbox\n"
@@ -194,6 +200,9 @@ class QemuProvider(CloudProvider):
     default_region = "local"
     default_image = DEFAULT_UBUNTU_IMAGE_URL
     default_instance_type = "2cpu-4gb"
+    # The QEMU provider creates a 'hermes' user via cloud-init (with sudo),
+    # so SSH connections default to that user rather than root.
+    default_ssh_user = "hermes"
 
     def __init__(
         self,
