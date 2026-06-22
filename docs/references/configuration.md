@@ -41,7 +41,7 @@ are always configured.
 | `SANDBOX_INSTANCE_TYPE` | `cx23` | `s-2vcpu-4gb` | `2cpu-4gb` | `cx23` |
 | `SANDBOX_REGION` | `nbg1` | `fra1` | `local` | `nbg1` |
 | `SANDBOX_IMAGE` | `ubuntu-24.04` | `ubuntu-24-04-x64` | Ubuntu 24.04 cloud image (URL) | `ubuntu-24.04` |
-| `SANDBOX_SSH_USER` | `root` | `root` | `hermes` | `root` |
+| `SANDBOX_SSH_USER` | `hermes` | `hermes` | `hermes` | `hermes` |
 | `SANDBOX_NAME` | `hermes-sandbox` | `hermes-sandbox` | `hermes-sandbox` | `hermes-sandbox` |
 
 The `dry-run` provider reuses the base defaults (same as `hetzner`) since it

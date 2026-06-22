@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from .provider import CloudProvider
 
-DEFAULT_SSH_USER = "root"
+DEFAULT_SSH_USER = CloudProvider.default_ssh_user
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class SandboxConfig:
     instance_type: str = CloudProvider.default_instance_type
     region: str = CloudProvider.default_region
     image: str = CloudProvider.default_image
-    ssh_user: str = DEFAULT_SSH_USER
+    ssh_user: str = CloudProvider.default_ssh_user
     token: str = ""
     vm_name: str = "hermes-sandbox"
     # 0 = never auto-teardown on session end; >0 = teardown after N idle seconds.

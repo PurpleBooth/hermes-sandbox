@@ -1,5 +1,7 @@
 """Tests for the Hetzner and DigitalOcean providers (fake HTTP)."""
 
+import base64
+
 import pytest
 
 import hermes_sandbox.digitalocean as do
@@ -295,3 +297,69 @@ def test_do_ensure_ssh_key_returns_int_new():
         f"_ensure_ssh_key must return int for new key, got {type(key_id).__name__}: {key_id!r}"
     )
     assert key_id == 42, f"_ensure_ssh_key should return id 42, got {key_id!r}"
+
+
+# ── cloud-init user-data (non-root provisioning) ───────────────────────────
+
+
+def test_hetzner_provision_includes_base64_user_data_with_hermes_user():
+    """Hetzner POST /servers must carry base64-encoded user_data that creates
+    the 'hermes' user, so the sandbox never runs as root."""
+    captured: dict[str, object] = {}
+
+    def fake_request(method, path, token, body=None, timeout=30):
+        if method == "GET" and path.startswith("/ssh_keys"):
+            return {"ssh_keys": []}
+        if method == "POST" and path == "/ssh_keys":
+            return {"ssh_key": {"name": "hermes-sandbox"}}
+        if method == "POST" and path == "/servers":
+            captured["body"] = body
+            return {"server": HZ_SERVER}
+        if method == "GET" and path.startswith("/servers/"):
+            return {"server": HZ_SERVER}
+        raise AssertionError(f"unexpected {method} {path}")
+
+    p = HetznerProvider(token="tok", poll_interval=0, poll_timeout=5, request_fn=fake_request)
+    p.provision("n", "cx22", "nbg1", "ubuntu-24.04", "ssh-ed25519 AAAAKEY")
+    body = captured["body"]
+    assert isinstance(body, dict), f"POST body should be a dict, got {type(body).__name__}"
+    assert "user_data" in body, "POST /servers must include user_data for the hermes user"
+    decoded = base64.b64decode(body["user_data"]).decode("utf-8")
+    assert "name: hermes" in decoded, (
+        f"user_data must create a 'hermes' user, decoded user_data:\n{decoded}"
+    )
+    assert "ssh-ed25519 AAAAKEY" in decoded, (
+        "user_data must embed the provisioned SSH public key for the hermes user"
+    )
+
+
+def test_do_provision_includes_user_data_with_hermes_user():
+    """DigitalOcean POST /droplets must carry plain-string user_data that
+    creates the 'hermes' user, so the sandbox never runs as root."""
+    captured: dict[str, object] = {}
+
+    def fake_request(method, path, token, body=None, timeout=30):
+        if method == "GET" and path == "/account/keys":
+            return {"ssh_keys": []}
+        if method == "POST" and path == "/account/keys":
+            return {"ssh_key": {"id": 7}}
+        if method == "POST" and path == "/droplets":
+            captured["body"] = body
+            return {"droplet": DO_DROPLET}
+        if method == "GET" and path.startswith("/droplets/"):
+            return {"droplet": DO_DROPLET}
+        raise AssertionError(f"unexpected {method} {path}")
+
+    p = DigitalOceanProvider(token="tok", poll_interval=0, poll_timeout=5, request_fn=fake_request)
+    p.provision("n", "s-2vcpu-4gb", "fra1", "ubuntu-24-04-x64", "ssh-ed25519 AAAAKEY")
+    body = captured["body"]
+    assert isinstance(body, dict), f"POST body should be a dict, got {type(body).__name__}"
+    assert "user_data" in body, "POST /droplets must include user_data for the hermes user"
+    user_data = body["user_data"]
+    assert isinstance(user_data, str), (
+        f"DO user_data must be a plain string (not base64), got {type(user_data).__name__}"
+    )
+    assert "name: hermes" in user_data, f"user_data must create a 'hermes' user, got:\n{user_data}"
+    assert "ssh-ed25519 AAAAKEY" in user_data, (
+        "user_data must embed the provisioned SSH public key for the hermes user"
+    )

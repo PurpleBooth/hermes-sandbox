@@ -37,7 +37,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .models import VMInstance
-from .provider import CloudProvider, register_provider
+from .provider import CloudProvider, build_cloud_init_user_data, register_provider
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +51,6 @@ ImageDownloader = Callable[[str, Path], None]
 DEFAULT_UBUNTU_IMAGE_URL = (
     "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
 )
-
-_CLOUD_INIT_USER_DATA = """\
-#cloud-config
-users:
-  - name: hermes
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-    ssh_authorized_keys:
-      - {public_key}
-"""
 
 _CLOUD_INIT_META_DATA = "instance-id: hermes-sandbox\nlocal-hostname: sandbox\n"
 
@@ -143,7 +133,7 @@ def _build_cloud_init_seed(
     """
     seed_dir = dest / "cidata"
     seed_dir.mkdir(parents=True, exist_ok=True)
-    (seed_dir / "user-data").write_text(_CLOUD_INIT_USER_DATA.format(public_key=public_key))
+    (seed_dir / "user-data").write_text(build_cloud_init_user_data(public_key))
     (seed_dir / "meta-data").write_text(_CLOUD_INIT_META_DATA)
 
     binary = iso_bin or _find_iso_builder()
@@ -200,9 +190,6 @@ class QemuProvider(CloudProvider):
     default_region = "local"
     default_image = DEFAULT_UBUNTU_IMAGE_URL
     default_instance_type = "2cpu-4gb"
-    # The QEMU provider creates a 'hermes' user via cloud-init (with sudo),
-    # so SSH connections default to that user rather than root.
-    default_ssh_user = "hermes"
 
     def __init__(
         self,
