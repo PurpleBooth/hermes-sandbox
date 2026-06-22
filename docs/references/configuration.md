@@ -12,8 +12,9 @@ them in your shell.
 
 The `dry-run` provider is for testing — it provisions an in-memory VM and
 requires no token.  The `qemu` provider runs VMs locally via QEMU — it
-needs no cloud token but requires `qemu-system-x86_64` installed and a
-local disk image (set `SANDBOX_IMAGE` to the qcow2 path).
+needs no cloud token but requires `qemu-system-x86_64` installed.  When
+`SANDBOX_IMAGE` is unset, the QEMU provider automatically downloads the
+Ubuntu 24.04 cloud image to a local cache on first use.
 
 ## Cloud credentials
 

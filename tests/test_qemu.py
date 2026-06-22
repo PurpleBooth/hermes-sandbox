@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -169,3 +170,78 @@ def test_qemu_provision_includes_ssh_key_in_cloud_init():
     assert "ssh-ed25519" in cmd_str or "cloud-init" in cmd_str.lower() or "cidata" in cmd_str.lower(), (
         "SSH public key must be passed to the VM (cloud-init, cidata, or fw_cfg)"
     )
+
+
+# ── Image resolution / download ──────────────────────────────────────────────
+
+
+def _fake_downloader(downloaded: dict[str, Path]):
+    """Build a fake downloader that writes a dummy file and records the URL."""
+
+    def downloader(url: str, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"fake qcow2")
+        downloaded["url"] = url
+        downloaded["dest"] = dest
+
+    return downloader
+
+
+def test_qemu_default_image_is_ubuntu_url():
+    """The default image is the Ubuntu 24.04 cloud image URL."""
+    assert QemuProvider.default_image.startswith("https://")
+    assert "ubuntu" in QemuProvider.default_image
+
+
+def test_qemu_provision_downloads_image_when_url(tmp_path):
+    """When the image is a URL, it is downloaded to the cache and the local
+    path is used in the QEMU command."""
+    runner = _fake_runner()
+    downloaded: dict[str, Path] = {}
+    downloader = _fake_downloader(downloaded)
+    p = QemuProvider(runner=runner, work_dir=tmp_path, downloader=downloader)
+    p.provision(
+        "v", "2cpu-2gb", "local",
+        "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
+        "k",
+    )
+    # The downloader was called with the URL.
+    assert downloaded["url"].startswith("https://cloud-images.ubuntu.com")
+    # The QEMU command uses the local cached path, not the URL.
+    cmd = runner.calls[0]
+    drive_args = [a for a in cmd if "qcow2" in a and "file=" in a]
+    assert not any("https://" in a for a in drive_args), "QEMU command must use a local path, not a URL"
+    # The cached file exists.
+    assert downloaded["dest"].exists()
+
+
+def test_qemu_provision_reuses_cached_image(tmp_path):
+    """A second provision with the same URL reuses the cached download."""
+    runner = _fake_runner()
+    download_count = [0]
+
+    def counting_downloader(url: str, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"fake qcow2")
+        download_count[0] += 1
+
+    p = QemuProvider(runner=runner, work_dir=tmp_path, downloader=counting_downloader)
+    url = "https://example.com/ubuntu.qcow2"
+    p.provision("v1", "2cpu-2gb", "local", url, "k")
+    p.provision("v2", "2cpu-2gb", "local", url, "k")
+    assert download_count[0] == 1, "second provision should reuse the cached image"
+
+
+def test_qemu_provision_uses_local_image_directly(tmp_path):
+    """When the image is a local path that exists, no download happens."""
+    runner = _fake_runner()
+    download_count = [0]
+
+    def counting_downloader(url: str, dest: Path) -> None:
+        download_count[0] += 1
+
+    local_img = tmp_path / "local.qcow2"
+    local_img.write_bytes(b"existing image")
+    p = QemuProvider(runner=runner, work_dir=tmp_path, downloader=counting_downloader)
+    p.provision("v", "2cpu-2gb", "local", str(local_img), "k")
+    assert download_count[0] == 0, "local image should not trigger a download"

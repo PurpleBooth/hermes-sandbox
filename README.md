@@ -22,7 +22,7 @@ ssh terminal backend is the stable default. Restart Hermes after install.
 |---|---|---|---|
 | Hetzner Cloud | `hetzner` | `HCLOUD_TOKEN` | Default. EU regions, IPv4+IPv6. |
 | DigitalOcean | `digitalocean` | `DIGITALOCEAN_TOKEN` (or `DO_API_TOKEN`) | Global regions, IPv4+IPv6. |
-| QEMU | `qemu` | none | Local hypervisor. Set `SANDBOX_IMAGE` to a qcow2 path. |
+| QEMU | `qemu` | none | Local hypervisor. Auto-downloads Ubuntu 24.04 cloud image if `SANDBOX_IMAGE` is unset. |
 | Dry-run | `dry-run` | none | In-memory simulation for testing. |
 
 List the providers available on your system:
