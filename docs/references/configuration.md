@@ -41,6 +41,20 @@ configured.
 |---|---|---|
 | `SANDBOX_AUTO_TEARDOWN_SECONDS` | `0` | `0` = keep VM across sessions; `>0` = tear down on session end |
 
+## Session mode
+
+| Variable | Default | Values |
+|---|---|---|
+| `SANDBOX_MODE` | `shared` | `shared` = one VM for all sessions; `isolated` = one VM per session |
+
+In `shared` mode (the default), all sessions reuse a single VM.  The VM
+state lives at `$HERMES_HOME/sandbox/state.json`.
+
+In `isolated` mode, each session provisions its own VM.  The per-session
+state lives at `$HERMES_HOME/sandbox/sessions/<session_id>/state.json`.
+When a session ends, its VM is torn down if `SANDBOX_AUTO_TEARDOWN_SECONDS`
+is greater than zero.
+
 ## State
 
 The plugin records the current VM in `$HERMES_HOME/sandbox/state.json`

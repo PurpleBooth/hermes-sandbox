@@ -23,9 +23,71 @@ def _make_manager(tmp_path, fake_key_factory):
 
 @pytest.fixture(autouse=True)
 def _reset_manager(monkeypatch):
-    # Each test starts with no cached manager.
+    # Each test starts with no cached manager and no sessions.
     monkeypatch.setattr(hermes_sandbox, "_manager", None)
+    monkeypatch.setattr(hermes_sandbox, "_sessions", {})
     yield
+
+
+def test_on_session_start_isolated_creates_per_session_state(tmp_path, fake_key_factory, monkeypatch):
+    """In isolated mode, each session gets its own state file and VM."""
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setattr(hermes_sandbox, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_MODE", "isolated")
+
+    hermes_sandbox._on_session_start(session_id="s1")
+    hermes_sandbox._on_session_start(session_id="s2")
+
+    s1_state = hermes_home / "sandbox" / "sessions" / "s1" / "state.json"
+    s2_state = hermes_home / "sandbox" / "sessions" / "s2" / "state.json"
+    assert s1_state.exists()
+    assert s2_state.exists()
+    # Each session has its own state file in its own directory — that's the
+    # isolation guarantee.  (vm_ids may match for DryRunProvider since each
+    # provider instance has its own counter; real cloud providers assign
+    # unique IDs.)
+
+
+def test_on_session_start_shared_uses_single_state(tmp_path, fake_key_factory, monkeypatch):
+    """In shared mode, all sessions reuse one VM and one state file."""
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setattr(hermes_sandbox, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_MODE", "shared")
+
+    hermes_sandbox._on_session_start(session_id="s1")
+    hermes_sandbox._on_session_start(session_id="s2")
+
+    shared_state = hermes_home / "sandbox" / "state.json"
+    assert shared_state.exists()
+    # No per-session directories.
+    assert not (hermes_home / "sandbox" / "sessions").exists()
+
+
+def test_on_session_end_isolated_tears_down_session_vm(tmp_path, fake_key_factory, monkeypatch):
+    """Ending one isolated session tears down its VM, not the other's."""
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setattr(hermes_sandbox, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_MODE", "isolated")
+    monkeypatch.setenv("SANDBOX_AUTO_TEARDOWN_SECONDS", "30")
+
+    hermes_sandbox._on_session_start(session_id="s1")
+    hermes_sandbox._on_session_start(session_id="s2")
+
+    s1_state = hermes_home / "sandbox" / "sessions" / "s1" / "state.json"
+    s2_state = hermes_home / "sandbox" / "sessions" / "s2" / "state.json"
+    assert s1_state.exists()
+    assert s2_state.exists()
+
+    hermes_sandbox._on_session_end(session_id="s1")
+
+    assert not s1_state.exists()   # s1 torn down
+    assert s2_state.exists()       # s2 still running
 
 
 def test_on_session_start_sets_ssh_env(tmp_path, fake_key_factory, monkeypatch):
