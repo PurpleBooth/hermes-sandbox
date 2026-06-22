@@ -17,8 +17,8 @@ fresh box? This is the path.
 4. On `on_session_end` the VM is torn down (only if `VM_SANDBOX_AUTO_TEARDOWN_SECONDS>0`);
    by default the VM is kept warm and reused next session.
 
-This is **Option A** from the architecture review: a plugin that orchestrates
-Hermes' existing `ssh` backend — no core changes, no monkeypatching.
+The plugin orchestrates Hermes' existing `ssh` backend — no core changes,
+no monkeypatching.
 
 ## Providers
 
@@ -47,7 +47,7 @@ hermes vm-sandbox enable     # or: hermes config set terminal.backend ssh
 ## Configure (in `~/.hermes/.env`)
 
 ```bash
-VM_SANDBOX_PROVIDER=hetzner              # hetzner | digitalocean
+VM_SANDBOX_PROVIDER=hetzner              # hetzner | digitalocean | dry-run
 HCLOUD_TOKEN=...                         # or DIGITALOCEAN_TOKEN / DO_API_TOKEN
 VM_SANDBOX_INSTANCE_TYPE=cx23            # provider-specific
 VM_SANDBOX_REGION=nbg1                   # provider-specific
@@ -68,7 +68,6 @@ In a session:
 /vm-sandbox provision    # provision/reuse now
 /vm-sandbox teardown     # destroy the VM
 /vm-sandbox enable       # set terminal.backend=ssh
-/vm-sandbox logs
 ```
 
 From the shell:
@@ -87,11 +86,13 @@ previous session is reused. The SSH keypair lives at
 ## Develop
 
 ```bash
-python -m pytest tests/ -o addopts=    # 38 tests, stdlib + pytest only
+just test          # pytest with coverage (unit + contract + property-based)
+just lint          # ruff + mypy strict
+just specdown      # end-to-end specs via the test-harness wrapper
 ```
 
-Tests use an in-memory `FakeProvider` and inject fake HTTP for the Hetzner/DO
-REST parsing — no cloud credentials required.
+Tests use an in-memory `dry-run` provider and inject fake HTTP for the
+Hetzner/DO REST parsing — no cloud credentials required.
 
 ## Architecture notes
 
