@@ -209,13 +209,28 @@ def test_qemu_provision_builds_cloud_init_seed_iso():
 
 
 def test_qemu_provision_writes_cloud_init_user_data(tmp_path):
-    """The SSH public key is written to the user-data file before building the ISO."""
+    """The user-data creates a 'hermes' user with the SSH key and sudo access."""
     runner = _fake_runner()
     p = QemuProvider(runner=runner, iso_bin="genisoimage", work_dir=tmp_path)
     p.provision("v", "2cpu-2gb", "local", "/img.qcow2", "ssh-ed25519 AAAAB3Nza...")
     user_data = (p._work_dir / "v" / "cidata" / "user-data").read_text()
-    assert "ssh-ed25519 AAAAB3Nza..." in user_data
-    assert "#cloud-config" in user_data
+    assert "#cloud-config" in user_data, "user-data must be a cloud-config document"
+    assert "name: hermes" in user_data, f"user-data must create a 'hermes' user, got:\n{user_data}"
+    assert "ssh-ed25519 AAAAB3Nza..." in user_data, (
+        "the provisioned SSH public key must be in the hermes user's authorized keys"
+    )
+    assert "sudo" in user_data, (
+        "the hermes user must have sudo access (the sandbox runs root commands)"
+    )
+
+
+def test_qemu_default_ssh_user_is_hermes():
+    """QEMU provider defaults to connecting as the 'hermes' user it creates."""
+    p = QemuProvider()
+    assert p.default_ssh_user == "hermes", (
+        f"expected default_ssh_user='hermes' so the lifecycle connects as the "
+        f"cloud-init user, got {p.default_ssh_user!r}"
+    )
 
 
 def test_qemu_provision_includes_seed_iso_in_qemu_command():

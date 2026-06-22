@@ -48,6 +48,7 @@ class CloudProvider(ABC):
     default_region: str = "nbg1"
     default_image: str = "ubuntu-24.04"
     default_instance_type: str = "cx23"
+    default_ssh_user: str = "root"
 
     @classmethod
     def resolve_token(cls, env: dict[str, str]) -> str:

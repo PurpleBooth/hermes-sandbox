@@ -54,7 +54,7 @@ class SandboxConfig:
             instance_type=_get("SANDBOX_INSTANCE_TYPE", defaults["instance_type"]),
             region=_get("SANDBOX_REGION", defaults["region"]),
             image=_get("SANDBOX_IMAGE", defaults["image"]),
-            ssh_user=_get("SANDBOX_SSH_USER", DEFAULT_SSH_USER),
+            ssh_user=_get("SANDBOX_SSH_USER", defaults["ssh_user"]),
             token=token,
             vm_name=_get("SANDBOX_NAME", "hermes-sandbox"),
             auto_teardown_seconds=int(_get("SANDBOX_AUTO_TEARDOWN_SECONDS", "0") or "0"),
@@ -85,7 +85,7 @@ def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
 
 
 def _provider_defaults(provider_name: str) -> dict[str, str]:
-    """Return the provider's default region/image/instance-type.
+    """Return the provider's default region/image/instance-type/ssh-user.
 
     Defaults live on the provider class (Open/Closed) so adding a provider
     needs no edit here.  Falls back to the base ``CloudProvider`` defaults if
@@ -100,9 +100,11 @@ def _provider_defaults(provider_name: str) -> dict[str, str]:
             "region": CloudProvider.default_region,
             "image": CloudProvider.default_image,
             "instance_type": CloudProvider.default_instance_type,
+            "ssh_user": CloudProvider.default_ssh_user,
         }
     return {
         "region": cls.default_region,
         "image": cls.default_image,
         "instance_type": cls.default_instance_type,
+        "ssh_user": cls.default_ssh_user,
     }
