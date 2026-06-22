@@ -6,11 +6,17 @@ credentials, no network.  It goes through the exact same lifecycle
 the plugin, exercise the lifecycle in tests, and verify a setup end-to-end
 without spending money.
 
+Each provisioned VM gets a random UUID (like a real cloud provider would
+assign) and a random private IP, so multiple independent provider instances
+— as used in isolated session mode — produce distinct VMs.
+
 Registered as ``dry-run``; select it with ``SANDBOX_PROVIDER=dry-run``.
 """
 
 from __future__ import annotations
 
+import random
+import uuid
 from typing import Any
 
 from .models import VMInstance
@@ -27,9 +33,13 @@ class DryRunProvider(CloudProvider):
         # ``token`` is accepted (and ignored) so ``get_provider(name, token=…)``
         # works uniformly across real and dry-run providers.
         self._vms: dict[str, VMInstance] = {}
-        self._counter = 0
         self.calls: list[dict[str, Any]] = []
         self.provision_delay = provision_delay
+
+    @staticmethod
+    def _random_ip() -> str:
+        """Return a random private IPv4 in 10.0.0.0/8."""
+        return f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
 
     def provision(
         self,
@@ -40,13 +50,12 @@ class DryRunProvider(CloudProvider):
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
     ) -> VMInstance:
-        self._counter += 1
-        vm_id = f"dry-run-{self._counter}"
+        vm_id = str(uuid.uuid4())
         vm = VMInstance(
             id=vm_id,
             name=name,
             status="running",
-            public_ip=f"10.0.0.{self._counter}",
+            public_ip=self._random_ip(),
             region=region,
             provider=self.name,
             extra={"labels": labels or {}, "instance_type": instance_type},

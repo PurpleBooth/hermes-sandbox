@@ -158,7 +158,6 @@ def test_slash_list_shows_vms(tmp_path, fake_key_factory, monkeypatch):
     mgr.ensure_vm()
     out = hermes_sandbox._handle_slash("list")
     assert out is not None
-    assert "dry-run-1" in out
     assert "dry-run" in out
 
 

@@ -95,7 +95,9 @@ def test_dry_run_provider_provision_get_teardown():
     vm = p.provision("v", "t", "r", "img", "ssh-key", labels={"x": "y"})
     assert vm.is_running()
     assert vm.public_ip
-    assert vm.id == "dry-run-1"
+    # UUID-style id (like a real cloud provider would assign).
+    assert len(vm.id) == 36, f"expected UUID, got {vm.id!r}"
+    assert vm.id.count("-") == 4
     assert p.get(vm.id).id == vm.id
     assert p.list_by_label("x", "y") == [vm]
     p.teardown(vm.id)
