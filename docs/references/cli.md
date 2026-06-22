@@ -15,7 +15,7 @@ hermes sandbox available
 ```
 
 ```text,verify(script_name="available", stream=stdout)
-Registered providers: digitalocean, dry-run, hetzner
+Registered providers: digitalocean, dry-run, hetzner, qemu
 ```
 
 ## Status

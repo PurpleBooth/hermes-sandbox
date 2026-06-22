@@ -8,6 +8,7 @@ HTTP (``request_fn``) — no network calls are made.
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any
 
 import pytest
@@ -86,10 +87,19 @@ def _do_request(
 # ── Provider factory ────────────────────────────────────────────────────────
 
 
+def _qemu_runner(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Fake QEMU runner — returns success for all commands."""
+    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+
 def _make_provider(name: str) -> CloudProvider:
     """Build a provider instance with fake HTTP where needed."""
     if name == "dry-run":
         return get_provider("dry-run", token="")
+    if name == "qemu":
+        from hermes_sandbox.qemu import QemuProvider
+
+        return QemuProvider(token="", runner=_qemu_runner)
     if name == "hetzner":
         from hermes_sandbox.hetzner import HetznerProvider
 
@@ -114,6 +124,7 @@ def _make_provider(name: str) -> CloudProvider:
 # Ensure all providers are registered before collecting parametrized tests.
 import hermes_sandbox.digitalocean  # noqa: F401, E402
 import hermes_sandbox.hetzner  # noqa: F401, E402
+import hermes_sandbox.qemu  # noqa: F401, E402
 
 _PROVIDERS = available_providers()
 
