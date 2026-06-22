@@ -16,8 +16,9 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from vm_sandbox.lifecycle import JsonStateRepository, SandboxConfig, SandboxState
+from vm_sandbox.config import SandboxConfig
 from vm_sandbox.provider import VMInstance, poll_until
+from vm_sandbox.state import JsonStateRepository, SandboxState
 
 # A non-empty text strategy for identifiers / values that must be meaningful.
 # Env var names/values cannot contain NUL (os.environ rejects it), so we

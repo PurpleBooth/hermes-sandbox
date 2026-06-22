@@ -38,7 +38,8 @@ from . import digitalocean as _digitalocean  # noqa: F401
 
 # Import providers so their @register_provider decorators run on load.
 from . import hetzner as _hetzner  # noqa: F401
-from .lifecycle import SandboxConfig, VMLifecycleManager
+from .config import SandboxConfig
+from .lifecycle import VMLifecycleManager
 from .provider import get_provider
 
 logger = logging.getLogger(__name__)
