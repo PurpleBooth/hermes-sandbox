@@ -1,83 +1,35 @@
-"""VM lifecycle manager for the vm-sandbox plugin.
+"""VM lifecycle use-case for the vm-sandbox plugin.
 
-Owns the on-disk state file that records the current sandbox VM so a VM
-provisioned in a previous Hermes session is reused instead of creating a
-new one each time.  Also owns the SSH keypair used to access the VM.
+:class:`VMLifecycleManager` is the application-layer orchestrator: it provisions,
+reuses, and tears down the sandbox VM by coordinating a
+:class:`~vm_sandbox.provider.CloudProvider` with a
+:class:`~vm_sandbox.state.StateRepository` (persistence seam) and an injectable
+clock/key-factory.  It performs no filesystem I/O directly — that lives in the
+repository — so it stays unit-testable with an in-memory repo.
 
-State file: ``$HERMES_HOME/vm-sandbox/state.json``
-
-  {
-    "vm_id": "...", "provider": "hetzner", "name": "hermes-sandbox",
-    "region": "nbg1", "public_ip": "1.2.3.4", "ssh_user": "root",
-    "created_at": 1719000000.0, "last_used": 1719000123.0
-  }
-
-The manager is deliberately provider-agnostic: it takes a
-:class:`~vm_sandbox.provider.CloudProvider` instance and a config mapping.
+This module also holds the two read-models the manager produces:
+:class:`SandboxStatus` (the public snapshot returned by ``status()``) and the
+private :class:`_LiveProbe` (the best-effort liveness result folded into it).
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
+from .config import SandboxConfig
 from .provider import CloudProvider, VMInstance
-from .ssh_util import KeyPair, chmod_private_key, generate_keypair, restrict_to_owner
+from .ssh_util import KeyPair, chmod_private_key, generate_keypair
+from .state import JsonStateRepository, SandboxState, StateRepository
 
 logger = logging.getLogger(__name__)
 
-STATE_FILENAME = "state.json"
-DEFAULT_INSTANCE_TYPE = "cx23"
-DEFAULT_REGION = "nbg1"
-DEFAULT_IMAGE = "ubuntu-24.04"
-DEFAULT_SSH_USER = "root"
 LABEL_KEY = "hermes-vm-sandbox"
 LABEL_VALUE = "true"
-
-
-@dataclass
-class SandboxConfig:
-    """Resolved configuration for the vm-sandbox plugin."""
-
-    provider_name: str = "hetzner"
-    instance_type: str = DEFAULT_INSTANCE_TYPE
-    region: str = DEFAULT_REGION
-    image: str = DEFAULT_IMAGE
-    ssh_user: str = DEFAULT_SSH_USER
-    token: str = ""
-    vm_name: str = "hermes-sandbox"
-    # 0 = never auto-teardown on session end; >0 = teardown after N idle seconds.
-    auto_teardown_seconds: int = 0
-
-    @classmethod
-    def from_env(cls, env: dict[str, str]) -> SandboxConfig:
-        def _get(key: str, default: str = "") -> str:
-            return env.get(key, default)
-
-        provider_name = _get("VM_SANDBOX_PROVIDER", "hetzner")
-        token = _resolve_token(provider_name, env)
-        defaults = _provider_defaults(provider_name)
-
-        return cls(
-            provider_name=provider_name,
-            instance_type=_get("VM_SANDBOX_INSTANCE_TYPE", defaults["instance_type"]),
-            region=_get("VM_SANDBOX_REGION", defaults["region"]),
-            image=_get("VM_SANDBOX_IMAGE", defaults["image"]),
-            ssh_user=_get("VM_SANDBOX_SSH_USER", DEFAULT_SSH_USER),
-            token=token,
-            vm_name=_get("VM_SANDBOX_NAME", "hermes-sandbox"),
-            auto_teardown_seconds=int(_get("VM_SANDBOX_AUTO_TEARDOWN_SECONDS", "0") or "0"),
-        )
-
-    def is_configured(self) -> bool:
-        # A token is only required for real providers; fakes don't need one.
-        return bool(self.token) or self.provider_name == "fake"
 
 
 @dataclass(frozen=True)
@@ -121,169 +73,6 @@ class _LiveProbe:
     ip: str
     alive: bool
     error: str = ""
-
-
-@dataclass(frozen=True)
-class SandboxState:
-    """The persisted sandbox record (what lives in ``state.json``).
-
-    A domain value object: the use-case layer (``VMLifecycleManager``) operates
-    on this typed value rather than a raw ``dict`` or filesystem paths.
-    """
-
-    vm_id: str
-    provider: str
-    name: str
-    region: str
-    public_ip: str
-    public_ipv6: str
-    ssh_host: str
-    ssh_user: str
-    created_at: float
-    last_used: float
-
-    @classmethod
-    def for_vm(cls, vm: VMInstance, ssh_user: str, now: float) -> SandboxState:
-        return cls(
-            vm_id=vm.id,
-            provider=vm.provider,
-            name=vm.name,
-            region=vm.region,
-            public_ip=vm.public_ip,
-            public_ipv6=vm.public_ipv6,
-            ssh_host=vm.preferred_ip(),
-            ssh_user=ssh_user,
-            created_at=now,
-            last_used=now,
-        )
-
-    def touched(self, now: float) -> SandboxState:
-        """Immutable update: return a copy with ``last_used`` advanced."""
-        return replace(self, last_used=now)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-class StateRepository(Protocol):
-    """Persistence seam for :class:`SandboxState` (dependency inversion).
-
-    The application layer (``VMLifecycleManager``) depends on this Protocol,
-    not on any concrete filesystem implementation — so persistence can be
-    swapped (e.g. an in-memory repo in tests) without touching the use-case.
-    """
-
-    @property
-    def path(self) -> Path:
-        """Filesystem path backing the state (for diagnostics / back-comat)."""
-        ...
-
-    @property
-    def key_dir(self) -> Path:
-        """Directory holding the state file and SSH keypair."""
-        ...
-
-    def load(self) -> SandboxState | None:
-        """Load the recorded state, or None if absent / unreadable."""
-        ...
-
-    def save(self, state: SandboxState) -> None:
-        """Persist (overwrite) the recorded state."""
-        ...
-
-    def clear(self) -> None:
-        """Delete the recorded state (idempotent)."""
-        ...
-
-
-class JsonStateRepository:
-    """Filesystem-backed :class:`StateRepository`.
-
-    Stores the sandbox state as JSON at ``<state_dir>/state.json`` and
-    restricts it to the owner.  The SSH keypair lives alongside it in
-    ``<state_dir>``.
-    """
-
-    def __init__(self, state_dir: Path) -> None:
-        self._dir = Path(state_dir)
-        self._dir.mkdir(parents=True, exist_ok=True)
-        self._path = self._dir / STATE_FILENAME
-
-    @property
-    def path(self) -> Path:
-        return self._path
-
-    @property
-    def key_dir(self) -> Path:
-        return self._dir
-
-    def load(self) -> SandboxState | None:
-        if not self._path.exists():
-            return None
-        try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return None
-            return self._state_from_dict(data)
-        except (ValueError, OSError) as exc:
-            # ValueError covers JSONDecodeError + UnicodeDecodeError; OSError
-            # covers permission/IO failures.  Other exceptions propagate.
-            logger.warning("vm-sandbox state file unreadable: %s", exc)
-            return None
-
-    @staticmethod
-    def _state_from_dict(data: dict[str, Any]) -> SandboxState | None:
-        known = set(SandboxState.__dataclass_fields__)
-        kwargs = {k: v for k, v in data.items() if k in known}
-        try:
-            return SandboxState(**kwargs)
-        except TypeError:
-            # Missing required field — treat as no usable state.
-            return None
-
-    def save(self, state: SandboxState) -> None:
-        self._path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
-        restrict_to_owner(str(self._path))  # connection details — owner-only
-
-    def clear(self) -> None:
-        with contextlib.suppress(FileNotFoundError):
-            self._path.unlink()
-
-
-def _resolve_token(provider_name: str, env: dict[str, str]) -> str:
-    """Resolve the API token by delegating to the provider class.
-
-    Falls back to ``VM_SANDBOX_TOKEN`` if the provider isn't registered yet
-    (e.g. during early config loading before provider modules are imported).
-    """
-    try:
-        from .provider import get_provider_class
-        return get_provider_class(provider_name).resolve_token(env)
-    except KeyError:
-        return env.get("VM_SANDBOX_TOKEN") or ""
-
-
-def _provider_defaults(provider_name: str) -> dict[str, str]:
-    """Return the provider's default region/image/instance-type.
-
-    Defaults live on the provider class (Open/Closed) so adding a provider
-    needs no edit here.  Falls back to the base ``CloudProvider`` defaults if
-    the provider isn't registered yet.
-    """
-    from .provider import CloudProvider, get_provider_class
-    try:
-        cls = get_provider_class(provider_name)
-    except KeyError:
-        return {
-            "region": CloudProvider.default_region,
-            "image": CloudProvider.default_image,
-            "instance_type": CloudProvider.default_instance_type,
-        }
-    return {
-        "region": cls.default_region,
-        "image": cls.default_image,
-        "instance_type": cls.default_instance_type,
-    }
 
 
 class VMLifecycleManager:

@@ -5,7 +5,8 @@ import time
 
 import pytest
 
-from vm_sandbox.lifecycle import SandboxConfig, VMLifecycleManager
+from vm_sandbox.config import SandboxConfig
+from vm_sandbox.lifecycle import VMLifecycleManager
 from vm_sandbox.provider import FakeProvider
 
 
