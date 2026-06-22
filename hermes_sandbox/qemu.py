@@ -10,16 +10,21 @@ the background.  The SSH public key is injected via a cloud-init seed disk
 is stored in ``VMInstance.extra["ssh_port"]`` so the lifecycle manager can
 emit ``TERMINAL_SSH_PORT``.
 
-Registered as ``qemu``; select it with ``SANDBOX_PROVIDER=qemu`` and point
-``SANDBOX_IMAGE`` at a local qcow2 disk image.
+If the image path is a URL (the default is the Ubuntu 24.04 cloud image),
+it is downloaded to a local cache on first use and reused thereafter.
+A local path is used as-is.
+
+Registered as ``qemu``; select it with ``SANDBOX_PROVIDER=qemu``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import subprocess
 import tempfile
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
@@ -30,6 +35,15 @@ logger = logging.getLogger(__name__)
 
 #: Type of the injectable subprocess runner (mirrors ``subprocess.run``).
 CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+
+#: Type of the injectable image downloader: (url, dest_path) -> None.
+ImageDownloader = Callable[[str, Path], None]
+
+#: Default Ubuntu 24.04 server cloud image (qcow2, ~600 MB).
+DEFAULT_UBUNTU_IMAGE_URL = (
+    "https://cloud-images.ubuntu.com/releases/24.04/release/"
+    "ubuntu-24.04-server-cloudimg-amd64.img"
+)
 
 _CLOUD_INIT_TEMPLATE = """\
 #cloud-config
@@ -58,6 +72,14 @@ def _default_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
 
+def _default_downloader(url: str, dest: Path) -> None:
+    """Download ``url`` to ``dest`` via stdlib urllib."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("qemu: downloading image from %s", url)
+    urllib.request.urlretrieve(url, dest)
+    logger.info("qemu: image cached at %s", dest)
+
+
 def _write_cloud_init_seed(public_key: str, dest: Path) -> Path:
     """Write a cloud-init seed ISO containing the SSH public key.
 
@@ -81,7 +103,7 @@ class QemuProvider(CloudProvider):
     name = "qemu"
     token_env_keys = ("SANDBOX_TOKEN",)
     default_region = "local"
-    default_image = ""
+    default_image = DEFAULT_UBUNTU_IMAGE_URL
     default_instance_type = "2cpu-4gb"
 
     def __init__(
@@ -91,6 +113,7 @@ class QemuProvider(CloudProvider):
         ssh_base_port: int = 2222,
         runner: CommandRunner | None = None,
         work_dir: Path | None = None,
+        downloader: ImageDownloader | None = None,
     ) -> None:
         # ``token`` is accepted (and ignored) so ``get_provider(name, token=…)``
         # works uniformly across all providers.
@@ -98,6 +121,7 @@ class QemuProvider(CloudProvider):
         self.ssh_base_port = ssh_base_port
         self._runner: CommandRunner = runner or _default_runner
         self._work_dir = work_dir or Path(tempfile.gettempdir()) / "hermes-sandbox"
+        self._downloader: ImageDownloader = downloader or _default_downloader
         self._vms: dict[str, VMInstance] = {}
         self._port_counter = 0
 
@@ -105,6 +129,24 @@ class QemuProvider(CloudProvider):
         port = self.ssh_base_port + self._port_counter
         self._port_counter += 1
         return port
+
+    def _resolve_image(self, image: str) -> str:
+        """Return a local filesystem path for the disk image.
+
+        If ``image`` is a URL, download it to the cache (once) and return the
+        cached path.  If it's a local path that exists, return it as-is.
+        """
+        if image.startswith(("http://", "https://")):
+            cache_dir = self._work_dir / "images"
+            # Deterministic filename from the URL hash so the same image is
+            # reused across runs.
+            url_hash = hashlib.sha256(image.encode()).hexdigest()[:16]
+            filename = image.rsplit("/", 1)[-1]
+            cached = cache_dir / f"{url_hash}-{filename}"
+            if not cached.exists():
+                self._downloader(image, cached)
+            return str(cached)
+        return image
 
     # -- CloudProvider interface ------------------------------------------
 
@@ -120,6 +162,9 @@ class QemuProvider(CloudProvider):
         smp, mem_mb = _parse_instance_type(instance_type)
         ssh_port = self._next_ssh_port()
 
+        # Resolve the image: download if it's a URL, use local path as-is.
+        local_image = self._resolve_image(image)
+
         # Build the cloud-init seed for SSH key injection.
         seed_iso = _write_cloud_init_seed(ssh_public_key, self._work_dir / name)
 
@@ -128,7 +173,7 @@ class QemuProvider(CloudProvider):
             "-name", name,
             "-m", str(mem_mb),
             "-smp", str(smp),
-            "-drive", f"file={image},format=qcow2,if=virtio",
+            "-drive", f"file={local_image},format=qcow2,if=virtio",
             "-drive", f"file={seed_iso},format=raw,if=virtio,readonly=on",
             "-netdev", f"user,id=net0,hostfwd=tcp::{ssh_port}-:22",
             "-device", "virtio-net-pci,netdev=net0",
