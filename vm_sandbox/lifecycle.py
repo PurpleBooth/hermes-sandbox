@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from .config import SandboxConfig
-from .provider import CloudProvider, VMInstance
+from .models import VMInstance
+from .provider import CloudProvider
 from .ssh_util import KeyPair, chmod_private_key, generate_keypair
 from .state import JsonStateRepository, SandboxState, StateRepository
 
