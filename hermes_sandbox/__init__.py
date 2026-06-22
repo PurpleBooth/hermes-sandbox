@@ -16,7 +16,7 @@ Configuration (env vars; put secrets in ``~/.hermes/.env``):
   SANDBOX_INSTANCE_TYPE     e.g. cx23 / s-2vcpu-4gb  (provider default)
   SANDBOX_REGION            e.g. nbg1 / fra1         (provider default)
   SANDBOX_IMAGE             e.g. ubuntu-24.04        (provider default)
-  SANDBOX_SSH_USER          default: root (hermes for qemu)
+  SANDBOX_SSH_USER          default: hermes
   SANDBOX_NAME              default: hermes-sandbox
   SANDBOX_AUTO_TEARDOWN_SECONDS  0 = keep VM across sessions (default);
                                     >0 = tear down on session end

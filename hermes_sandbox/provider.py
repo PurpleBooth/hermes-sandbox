@@ -30,6 +30,30 @@ from .models import ApiError, VMInstance
 # (method, path, token, body, timeout) -> parsed JSON dict.
 RequestFn = Callable[..., dict[str, Any]]
 
+#: cloud-init template: creates a non-root ``hermes`` user with passwordless
+#: sudo and the injected SSH key.  Every provider uses this so the sandbox
+#: never connects as (or runs commands as) ``root``.
+_CLOUD_INIT_USER_DATA = """\
+#cloud-config
+users:
+  - name: hermes
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - {public_key}
+"""
+
+
+def build_cloud_init_user_data(public_key: str) -> str:
+    """Return cloud-init user-data that creates the ``hermes`` user.
+
+    All providers use this helper so non-root provisioning stays consistent
+    across QEMU (NoCloud seed ISO) and cloud providers (``user_data`` API
+    field).  The caller is responsible for base64-encoding when the API
+    requires it (e.g. Hetzner).
+    """
+    return _CLOUD_INIT_USER_DATA.format(public_key=public_key)
+
 
 class CloudProvider(ABC):
     """Interface every cloud backend must implement."""
@@ -48,7 +72,7 @@ class CloudProvider(ABC):
     default_region: str = "nbg1"
     default_image: str = "ubuntu-24.04"
     default_instance_type: str = "cx23"
-    default_ssh_user: str = "root"
+    default_ssh_user: str = "hermes"
 
     @classmethod
     def resolve_token(cls, env: dict[str, str]) -> str:

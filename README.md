@@ -46,7 +46,7 @@ table of provider-specific defaults):
     SANDBOX_INSTANCE_TYPE=cx23            # provider-specific
     SANDBOX_REGION=nbg1                   # provider-specific
     SANDBOX_IMAGE=ubuntu-24.04            # provider-specific
-    SANDBOX_SSH_USER=root                 # default root (cloud images)
+    SANDBOX_SSH_USER=hermes               # default hermes (created via cloud-init)
     SANDBOX_NAME=hermes-sandbox           # VM name
     SANDBOX_AUTO_TEARDOWN_SECONDS=0       # 0 = keep across sessions; >0 = teardown on session end
     SANDBOX_MODE=shared                   # shared = one VM for all; isolated = one VM per session

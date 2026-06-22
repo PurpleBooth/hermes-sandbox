@@ -12,12 +12,13 @@ can discover sandboxes created by a previous Hermes process.
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 from urllib.parse import urlencode
 
 from .models import ApiError, VMInstance
-from .provider import RestCloudProvider, poll_until, register_provider
+from .provider import RestCloudProvider, build_cloud_init_user_data, poll_until, register_provider
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,10 @@ class HetznerProvider(RestCloudProvider):
             "ssh_keys": [key_name],
             "labels": labels,
             "public_net": {"enable_ipv4": True, "enable_ipv6": True},
+            # Hetzner requires user_data to be base64-encoded.
+            "user_data": base64.b64encode(
+                build_cloud_init_user_data(ssh_public_key).encode("utf-8")
+            ).decode("ascii"),
         }
         resp = self._request("POST", "/servers", self.token, body=body)
         vm = _to_vm(resp.get("server", {}))

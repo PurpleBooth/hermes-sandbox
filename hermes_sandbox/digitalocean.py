@@ -17,7 +17,7 @@ from dataclasses import replace
 from typing import Any
 
 from .models import ApiError, VMInstance
-from .provider import RestCloudProvider, poll_until, register_provider
+from .provider import RestCloudProvider, build_cloud_init_user_data, poll_until, register_provider
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,8 @@ class DigitalOceanProvider(RestCloudProvider):
             "tags": [_TAG],
             "backups": False,
             "ipv6": True,
+            # DigitalOcean accepts user_data as a plain string (no base64).
+            "user_data": build_cloud_init_user_data(ssh_public_key),
         }
         resp = self._request("POST", "/droplets", self.token, body=body)
         vm = self._to_vm_running_aware(resp.get("droplet", {}))
