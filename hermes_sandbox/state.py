@@ -46,6 +46,7 @@ class SandboxState:
 
     @classmethod
     def for_vm(cls, vm: VMInstance, ssh_user: str, now: float) -> SandboxState:
+        """Build a :class:`SandboxState` from a freshly provisioned VM."""
         return cls(
             vm_id=vm.id,
             provider=vm.provider,
@@ -65,6 +66,7 @@ class SandboxState:
         return replace(self, last_used=now)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialise to a plain dict for JSON persistence."""
         return asdict(self)
 
 
@@ -121,6 +123,7 @@ class JsonStateRepository:
         return self._dir
 
     def load(self) -> SandboxState | None:
+        """Load the recorded state, or ``None`` if absent or unreadable."""
         if not self._path.exists():
             return None
         try:
@@ -145,9 +148,11 @@ class JsonStateRepository:
             return None
 
     def save(self, state: SandboxState) -> None:
+        """Persist (overwrite) the recorded state, restricted to the owner."""
         self._path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
         restrict_to_owner(str(self._path))  # connection details — owner-only
 
     def clear(self) -> None:
+        """Delete the recorded state (idempotent — missing file is a no-op)."""
         with contextlib.suppress(FileNotFoundError):
             self._path.unlink()

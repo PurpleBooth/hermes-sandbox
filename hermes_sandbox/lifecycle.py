@@ -59,6 +59,7 @@ class SandboxStatus:
     error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialise to a plain dict (stable JSON keys for the CLI ``status``)."""
         return asdict(self)
 
 

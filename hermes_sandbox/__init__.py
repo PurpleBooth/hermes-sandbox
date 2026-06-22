@@ -363,6 +363,7 @@ def _enable_ssh_backend() -> str:
 
 
 def _setup_cli(parser: argparse.ArgumentParser) -> None:
+    """Register the ``hermes sandbox`` subcommands on ``parser``."""
     sub = parser.add_subparsers(dest="hermes_sandbox_action")
     sub.add_parser("status", help="Show the current sandbox VM")
     sub.add_parser("provision", help="Provision/reuse a VM now")
@@ -375,6 +376,7 @@ def _setup_cli(parser: argparse.ArgumentParser) -> None:
 
 
 def _handle_cli(args: argparse.Namespace) -> int:
+    """Dispatch a ``hermes sandbox`` CLI invocation, returning the exit code."""
     action = getattr(args, "hermes_sandbox_action", None) or "status"
     if action == "available":
         from .provider import available_providers
@@ -392,6 +394,7 @@ def _handle_cli(args: argparse.Namespace) -> int:
 
 
 def register(ctx: Any) -> None:
+    """Plugin entry point: register session hooks, slash + CLI commands."""
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_command(
