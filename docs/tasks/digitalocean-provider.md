@@ -3,18 +3,18 @@
 Provision a real DigitalOcean droplet as your Hermes sandbox, run commands
 on it, then tear it down when you are done.
 
-Set `VM_SANDBOX_PROVIDER=digitalocean` and `DIGITALOCEAN_TOKEN` in
+Set `SANDBOX_PROVIDER=digitalocean` and `DIGITALOCEAN_TOKEN` in
 `~/.hermes/.env` (or export them in your shell).  In CI the token comes
 from the `DO_TOKEN` secret.
 
 ## Check there is no VM yet
 
 ```shell,script(name="status-before", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status
+SANDBOX_PROVIDER=digitalocean hermes sandbox status
 ```
 
 ```text,verify(script_name="status-before", stream=stdout)
-[vm-sandbox] No sandbox VM recorded.
+[sandbox] No sandbox VM recorded.
 ```
 
 ## Provision the VM
@@ -24,13 +24,13 @@ with a public IP.  The id and IP are not predictable, so we just check the
 exit code — the next step confirms the VM was recorded.
 
 ```shell,script(name="provision", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox provision
+SANDBOX_PROVIDER=digitalocean hermes sandbox provision
 ```
 
 ## Check the VM status
 
 ```shell,script(name="status-after", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status | grep '"provider"'
+SANDBOX_PROVIDER=digitalocean hermes sandbox status | grep '"provider"'
 ```
 
 ```text,verify(script_name="status-after", stream=stdout)
@@ -58,19 +58,19 @@ Docker version 26.0.0, build 2ae903e
 When you are done, destroy the droplet so you stop paying for it:
 
 ```shell,script(name="teardown", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox teardown
+SANDBOX_PROVIDER=digitalocean hermes sandbox teardown
 ```
 
 ```text,verify(script_name="teardown", stream=stdout)
-[vm-sandbox] VM torn down.
+[sandbox] VM torn down.
 ```
 
 ## Confirm it is gone
 
 ```shell,script(name="status-after-teardown", expected_exit_code=0)
-VM_SANDBOX_PROVIDER=digitalocean hermes vm-sandbox status
+SANDBOX_PROVIDER=digitalocean hermes sandbox status
 ```
 
 ```text,verify(script_name="status-after-teardown", stream=stdout)
-[vm-sandbox] No sandbox VM recorded.
+[sandbox] No sandbox VM recorded.
 ```

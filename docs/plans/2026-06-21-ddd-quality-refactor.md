@@ -1,12 +1,12 @@
-# vm-sandbox DDD / Quality / Functional Refactor Plan
+# sandbox DDD / Quality / Functional Refactor Plan
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Refactor `vm_sandbox/` to improve DDD layering, test quality, best
+**Goal:** Refactor `hermes_sandbox/` to improve DDD layering, test quality, best
 practices, and functional style — in small verified TDD steps, no big-bang
 rewrite.
 
-**Architecture:** Keep the flat `vm_sandbox/` package (plugin discovery depends
+**Architecture:** Keep the flat `hermes_sandbox/` package (plugin discovery depends
 on `register` in `__init__`). Make targeted improvements: extract value objects,
 remove dead code, fix a latent DigitalOcean bug, DRY the poll loops, narrow
 exception handling, and restore encapsulation between the plugin entrypoint and
@@ -38,7 +38,7 @@ the lifecycle manager.
 - **Latent bug, masked by a passing contract test:** `DigitalOceanProvider
   .list_by_label` hardcodes the tag `_TAG` and ignores `label_key`/`label_value`.
   `test_list_by_label_finds_provisioned_vm` passes only because it passes
-  `label_key="hermes-vm-sandbox"`, which matches the hardcoded tag — Task 1.
+  `label_key="hermes-sandbox"`, which matches the hardcoded tag — Task 1.
 - `ssh_util.py` is 36% covered; `generate_keypair`/`wait_for_ssh` real paths
   untested. Out of scope to add network/subprocess tests, but Task 5 makes the
   provider poll loops injectable so they can be exercised without real sleep.
@@ -48,7 +48,7 @@ the lifecycle manager.
   field mapping drift is invisible — Task 1 adds a body assertion for DO.
 
 ### Best practices
-- Dead `logs` slash subcommand reads `vm-sandbox.log`, a file nothing writes.
+- Dead `logs` slash subcommand reads `sandbox.log`, a file nothing writes.
   Not in `docs/references/cli.md`. YAGNI — Task 2 removes it.
 - `_load_state` catches bare `Exception` — Task 8 narrows it.
 - `_save_state` calls `chmod_private_key(state_path)` on a JSON file; the helper
@@ -71,7 +71,7 @@ the lifecycle manager.
 (the passed key) instead of the hardcoded tag. DO tags have no value, so
 `label_value` is ignored (documented).
 
-**Files:** `vm_sandbox/digitalocean.py`, `tests/test_providers_api.py`
+**Files:** `hermes_sandbox/digitalocean.py`, `tests/test_providers_api.py`
 
 **Step 1 — failing test** in `tests/test_providers_api.py`:
 
@@ -105,16 +105,16 @@ def list_by_label(self, label_key: str, label_value: str) -> list[VMInstance]:
 
 ## Task 2: Remove dead `logs` slash subcommand
 
-**Objective:** YAGNI — nothing writes `vm-sandbox.log`; the subcommand is
+**Objective:** YAGNI — nothing writes `sandbox.log`; the subcommand is
 undocumented in `docs/references/cli.md`.
 
-**Files:** `vm_sandbox/__init__.py`
+**Files:** `hermes_sandbox/__init__.py`
 
 **Step 1 — test** (adjust existing): `test_slash_help` already only asserts
-`"/vm-sandbox" in out`. Add an assertion that `logs` is no longer advertised:
+`"/sandbox" in out`. Add an assertion that `logs` is no longer advertised:
 ```python
 def test_slash_help_does_not_advertise_dead_logs():
-    out = vm_sandbox._handle_slash("help")
+    out = hermes_sandbox._handle_slash("help")
     assert "logs" not in out
 ```
 Run → FAIL.
@@ -131,13 +131,13 @@ from `_HELP`. Verify PASS + `just lint`.
 the keys the specdown `status-after` grep checks (`vm_id`, `provider`,
 `public_ip`).
 
-**Files:** `vm_sandbox/lifecycle.py`, `vm_sandbox/__init__.py`,
+**Files:** `hermes_sandbox/lifecycle.py`, `hermes_sandbox/__init__.py`,
 `tests/test_lifecycle.py`
 
 **Step 1 — failing test:**
 ```python
 def test_status_returns_sandboxstatus(tmp_path, fake_key_factory):
-    from vm_sandbox.lifecycle import SandboxStatus
+    from hermes_sandbox.lifecycle import SandboxStatus
     mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
     mgr.ensure_vm()
     st = mgr.status()
@@ -166,15 +166,15 @@ test` + `just lint`.
 `default_image`, `default_instance_type` class attrs; `from_env` reads them via
 `get_provider_class`. Fallback to base defaults if not registered.
 
-**Files:** `vm_sandbox/provider.py`, `vm_sandbox/hetzner.py`,
-`vm_sandbox/digitalocean.py`, `vm_sandbox/lifecycle.py`
+**Files:** `hermes_sandbox/provider.py`, `hermes_sandbox/hetzner.py`,
+`hermes_sandbox/digitalocean.py`, `hermes_sandbox/lifecycle.py`
 
 **Step 1 — test** (already green, keep): `test_config_from_env_digitalocean_defaults`
 asserts DO defaults. Add a test that a custom provider's defaults are honoured:
 ```python
 def test_config_from_env_uses_provider_defaults(monkeypatch):
     # hetzner default region is nbg1
-    monkeypatch.setenv("VM_SANDBOX_PROVIDER", "hetzner")
+    monkeypatch.setenv("SANDBOX_PROVIDER", "hetzner")
     monkeypatch.setenv("HCLOUD_TOKEN", "t")
     cfg = SandboxConfig.from_env(__import__("os").environ)
     assert cfg.region == "nbg1"
@@ -194,13 +194,13 @@ test passes + `just lint`.
 **Objective:** DRY the two provider poll loops; make sleep injectable so the
 loops are testable without real sleeping.
 
-**Files:** `vm_sandbox/provider.py` (add `poll_until`), `vm_sandbox/hetzner.py`,
-`vm_sandbox/digitalocean.py`
+**Files:** `hermes_sandbox/provider.py` (add `poll_until`), `hermes_sandbox/hetzner.py`,
+`hermes_sandbox/digitalocean.py`
 
 **Step 1 — failing test** for `poll_until`:
 ```python
 def test_poll_until_returns_when_predicate_true():
-    from vm_sandbox.provider import poll_until
+    from hermes_sandbox.provider import poll_until
     calls = {"n": 0}
     def pred():
         calls["n"] += 1
@@ -225,13 +225,13 @@ providers' `provision` to use it, accepting `sleep` in `__init__` (default
 
 **Objective:** Immutability for the domain entity.
 
-**Files:** `vm_sandbox/provider.py`, `vm_sandbox/digitalocean.py`,
+**Files:** `hermes_sandbox/provider.py`, `hermes_sandbox/digitalocean.py`,
 `tests/test_lifecycle.py`, `tests/test_providers_api.py`
 
 **Step 1 — test:** add
 ```python
 def test_vminstance_is_frozen():
-    from vm_sandbox.provider import VMInstance
+    from hermes_sandbox.provider import VMInstance
     vm = VMInstance("1","n","running","1.2.3.4","r","p")
     with pytest.raises(dataclasses.FrozenInstanceError):
         vm.status = "off"
@@ -250,7 +250,7 @@ Verify `just test` + `just lint` (mypy frozen dataclass fine).
 **Objective:** Remove the misleading comment + non-functional fold; keep a
 correct, tested roundtrip that drops unknown keys.
 
-**Files:** `vm_sandbox/provider.py`, `tests/test_provider.py`
+**Files:** `hermes_sandbox/provider.py`, `tests/test_provider.py`
 
 **Step 1 — test:** add a test asserting unknown keys are dropped (not folded):
 ```python
@@ -270,7 +270,7 @@ Run → check current behaviour; fix to match.
 
 **Objective:** Catch `(json.JSONDecodeError, OSError)` not bare `Exception`.
 
-**Files:** `vm_sandbox/lifecycle.py`
+**Files:** `hermes_sandbox/lifecycle.py`
 
 **Step 1 — test:** add a test that writes a corrupt state file and asserts
 `_load_state` returns None (already covered indirectly; make explicit + add a
@@ -284,7 +284,7 @@ test` + `just lint`.
 **Objective:** Remove the `manager._load_state()` private access (`# noqa:
 SLF001`) from `__init__._apply_ssh_env`.
 
-**Files:** `vm_sandbox/lifecycle.py`, `vm_sandbox/__init__.py`
+**Files:** `hermes_sandbox/lifecycle.py`, `hermes_sandbox/__init__.py`
 
 **Step 1 — test:**
 ```python
@@ -312,7 +312,7 @@ file; the helper's docstring says "Ensure a private key is 0600". Inline a clear
 `os.chmod(self.state_path, 0o600)` with a comment, or add a generic
 `restrict_to_owner(path)` in `ssh_util.py`.
 
-**Files:** `vm_sandbox/ssh_util.py`, `vm_sandbox/lifecycle.py`
+**Files:** `hermes_sandbox/ssh_util.py`, `hermes_sandbox/lifecycle.py`
 
 **Step 1 — test:** `test_save_state_restricts_permissions` asserting the state
 file mode is 0o600 after `_save_state`. Run → should pass already (current code

@@ -1,4 +1,4 @@
-"""SSH keypair management and readiness probing for vm-sandbox."""
+"""SSH keypair management and readiness probing for sandbox."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class KeyPair:
     public_key: str  # full "ssh-ed25519 AAAA... comment" string
 
 
-def generate_keypair(key_dir: Path, name: str = "hermes-vm-sandbox") -> KeyPair:
+def generate_keypair(key_dir: Path, name: str = "hermes-sandbox") -> KeyPair:
     """Generate an ed25519 keypair at ``<key_dir>/<name>`` (no passphrase).
 
     If the private key already exists it is reused — we never clobber an
@@ -37,7 +37,7 @@ def generate_keypair(key_dir: Path, name: str = "hermes-vm-sandbox") -> KeyPair:
             ssh_keygen,
             "-t", "ed25519",
             "-N", "",
-            "-C", "hermes-vm-sandbox",
+            "-C", "hermes-sandbox",
             "-f", str(private),
         ]
         result = subprocess.run(

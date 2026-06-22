@@ -2,12 +2,12 @@
 
 import pytest
 
-import vm_sandbox.digitalocean as do
-import vm_sandbox.hetzner as hz
-from vm_sandbox.digitalocean import DigitalOceanProvider
-from vm_sandbox.digitalocean import _to_vm as do_to_vm
-from vm_sandbox.hetzner import HetznerProvider
-from vm_sandbox.hetzner import _to_vm as hz_to_vm
+import hermes_sandbox.digitalocean as do
+import hermes_sandbox.hetzner as hz
+from hermes_sandbox.digitalocean import DigitalOceanProvider
+from hermes_sandbox.digitalocean import _to_vm as do_to_vm
+from hermes_sandbox.hetzner import HetznerProvider
+from hermes_sandbox.hetzner import _to_vm as hz_to_vm
 
 # ── Hetzner ────────────────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ HZ_SERVER = {
         "ipv6": {"ip": "2a01:db8::/64"},
     },
     "datacenter": {"location": {"name": "nbg1"}},
-    "labels": {"hermes-vm-sandbox": "true"},
+    "labels": {"hermes-sandbox": "true"},
     "server_type": {"name": "cx22"},
     "image": {"name": "ubuntu-24.04"},
 }
@@ -41,7 +41,7 @@ def test_hetzner_provision_polls_for_ip():
         if method == "GET" and path.startswith("/ssh_keys"):
             return {"ssh_keys": []}
         if method == "POST" and path == "/ssh_keys":
-            return {"ssh_key": {"name": "hermes-vm-sandbox"}}
+            return {"ssh_key": {"name": "hermes-sandbox"}}
         if method == "POST" and path == "/servers":
             # Return a server with no IP yet — polling must fetch it.
             return {"server": {**HZ_SERVER, "public_net": {"ipv4": {}, "ipv6": {}}}}
@@ -59,7 +59,7 @@ def test_hetzner_provision_polls_for_ip():
 
 
 def test_hetzner_teardown_404_is_success():
-    from vm_sandbox.models import ApiError
+    from hermes_sandbox.models import ApiError
 
     def fake_request(method, path, token, body=None, timeout=30):
         raise ApiError("GET", path, status_code=404, detail="not found")
@@ -69,7 +69,7 @@ def test_hetzner_teardown_404_is_success():
 
 
 def test_hetzner_teardown_500_raises_api_error():
-    from vm_sandbox.models import ApiError
+    from hermes_sandbox.models import ApiError
 
     def fake_request(method, path, token, body=None, timeout=30):
         raise ApiError("DELETE", path, status_code=500, detail="boom")
@@ -83,7 +83,7 @@ def test_hetzner_teardown_500_raises_api_error():
 def test_api_error_is_a_runtime_error_subclass():
     """ApiError subclasses RuntimeError so existing 'except RuntimeError' callers
     that don't check status_code still catch it (backwards-compatible)."""
-    from vm_sandbox.models import ApiError
+    from hermes_sandbox.models import ApiError
 
     assert issubclass(ApiError, RuntimeError)
 
@@ -113,7 +113,7 @@ DO_DROPLET = {
         "v6": [{"type": "public", "ip_address": "2604::1"}],
     },
     "region": {"slug": "fra1"},
-    "tags": ["hermes-vm-sandbox"],
+    "tags": ["hermes-sandbox"],
     "size": {"slug": "s-2vcpu-4gb"},
     "image": {"slug": "ubuntu-24-04-x64"},
 }
@@ -152,7 +152,7 @@ def test_do_provision_polls_until_active():
 
 
 def test_do_teardown_404_is_success():
-    from vm_sandbox.models import ApiError
+    from hermes_sandbox.models import ApiError
 
     def fake_request(method, path, token, body=None, timeout=30):
         raise ApiError("DELETE", path, status_code=404, detail="not found")

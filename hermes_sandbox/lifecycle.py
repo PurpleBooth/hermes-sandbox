@@ -1,9 +1,9 @@
-"""VM lifecycle use-case for the vm-sandbox plugin.
+"""VM lifecycle use-case for the sandbox plugin.
 
 :class:`VMLifecycleManager` is the application-layer orchestrator: it provisions,
 reuses, and tears down the sandbox VM by coordinating a
-:class:`~vm_sandbox.provider.CloudProvider` with a
-:class:`~vm_sandbox.state.StateRepository` (persistence seam) and an injectable
+:class:`~hermes_sandbox.provider.CloudProvider` with a
+:class:`~hermes_sandbox.state.StateRepository` (persistence seam) and an injectable
 clock/key-factory.  It performs no filesystem I/O directly — that lives in the
 repository — so it stays unit-testable with an in-memory repo.
 
@@ -29,7 +29,7 @@ from .state import JsonStateRepository, SandboxState, StateRepository
 
 logger = logging.getLogger(__name__)
 
-LABEL_KEY = "hermes-vm-sandbox"
+LABEL_KEY = "hermes-sandbox"
 LABEL_VALUE = "true"
 
 
@@ -102,7 +102,7 @@ class VMLifecycleManager:
         self._clock = clock
         self._sleep = sleep
         self._repo: StateRepository = state_repo or JsonStateRepository(
-            self.hermes_home / "vm-sandbox"
+            self.hermes_home / "sandbox"
         )
 
     # -- back-comat accessors (tests / diagnostics) ------------------------
@@ -118,7 +118,7 @@ class VMLifecycleManager:
     # -- keypair -----------------------------------------------------------
 
     def keypair(self) -> KeyPair:
-        kp = self._key_factory(self._repo.key_dir, "hermes-vm-sandbox")
+        kp = self._key_factory(self._repo.key_dir, "hermes-sandbox")
         chmod_private_key(kp.private_path)
         return kp
 
@@ -137,7 +137,7 @@ class VMLifecycleManager:
         host = state.ssh_host or state.public_ip
         if not host:
             return None
-        key_path = str(self._repo.key_dir / "hermes-vm-sandbox")
+        key_path = str(self._repo.key_dir / "hermes-sandbox")
         return {
             "TERMINAL_ENV": "ssh",
             "TERMINAL_SSH_HOST": host,
@@ -194,19 +194,19 @@ class VMLifecycleManager:
                 vm = self.provider.get(state.vm_id)
                 if vm.is_running() and vm.preferred_ip():
                     logger.info(
-                        "vm-sandbox: reusing existing VM %s (%s)",
+                        "sandbox: reusing existing VM %s (%s)",
                         vm.id,
                         vm.preferred_ip(),
                     )
                     self._repo.save(state.touched(self._clock()))
                     return vm
                 logger.info(
-                    "vm-sandbox: recorded VM %s not running (status=%s) — reprovisioning",
+                    "sandbox: recorded VM %s not running (status=%s) — reprovisioning",
                     vm.id,
                     vm.status,
                 )
             except Exception as exc:
-                logger.info("vm-sandbox: recorded VM unreachable (%s) — reprovisioning", exc)
+                logger.info("sandbox: recorded VM unreachable (%s) — reprovisioning", exc)
             self._repo.clear()
 
         # Provision fresh.
@@ -221,7 +221,7 @@ class VMLifecycleManager:
             labels=labels,
         )
         self._repo.save(SandboxState.for_vm(vm, self.config.ssh_user, self._clock()))
-        logger.info("vm-sandbox: provisioned VM %s (%s)", vm.id, vm.preferred_ip())
+        logger.info("sandbox: provisioned VM %s (%s)", vm.id, vm.preferred_ip())
         return vm
 
     def teardown(self) -> bool:
@@ -231,9 +231,9 @@ class VMLifecycleManager:
             return False
         try:
             self.provider.teardown(state.vm_id)
-            logger.info("vm-sandbox: tore down VM %s", state.vm_id)
+            logger.info("sandbox: tore down VM %s", state.vm_id)
         except Exception as exc:
-            logger.warning("vm-sandbox: teardown of %s failed: %s", state.vm_id, exc)
+            logger.warning("sandbox: teardown of %s failed: %s", state.vm_id, exc)
             # Still clear local state so we don't keep pointing at a dead VM.
         self._repo.clear()
         return True
