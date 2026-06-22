@@ -21,18 +21,13 @@ from hermes_sandbox.models import VMInstance
 from hermes_sandbox.provider import poll_until
 from hermes_sandbox.state import JsonStateRepository, SandboxState
 
-# A non-empty text strategy for identifiers / values that must be meaningful.
-# Env var names/values cannot contain NUL (os.environ rejects it), so we
-# restrict the alphabet to printable-ish characters — a real domain constraint.
 _safe_chars = st.characters(blacklist_categories=("Cs",), blacklist_characters="\x00")
 nonempty_text = st.text(alphabet=_safe_chars, min_size=1, max_size=40)
-# Env-var-name-safe text (identifier-ish).
 env_name = st.text(
     alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"), whitelist_characters="_-"),
     min_size=1,
     max_size=30,
 )
-# IPv4-ish / IPv6-ish strings (we don't validate format, just exercise logic).
 ip_text = st.text(alphabet=_safe_chars, min_size=1, max_size=40)
 
 vminstance_strategy = st.builds(
@@ -48,39 +43,36 @@ vminstance_strategy = st.builds(
 )
 
 
-# ── VMInstance: to_dict / from_dict roundtrip ──────────────────────────────
-
-
 @given(vminstance_strategy)
 def test_vminstance_to_dict_from_dict_is_identity(vm: VMInstance):
     """Round-tripping any VMInstance through dict yields an equal value."""
     restored = VMInstance.from_dict(vm.to_dict())
-    assert restored == vm
+    assert restored == vm, f"roundtrip must yield an equal value, got {restored!r} vs {vm!r}"
 
 
 @given(vminstance_strategy)
 def test_vminstance_to_dict_has_all_fields(vm: VMInstance):
     """to_dict exposes every dataclass field."""
     for field in dataclasses.fields(vm):
-        assert field.name in vm.to_dict()
-
-
-# ── preferred_ip: IPv6 always wins when present ────────────────────────────
+        assert field.name in vm.to_dict(), (
+            f"to_dict must expose field {field.name!r}, got {sorted(vm.to_dict())}"
+        )
 
 
 @given(ip_text, ip_text)
 def test_preferred_ip_returns_ipv6_when_present(ipv4: str, ipv6: str):
     vm = VMInstance("1", "n", "running", ipv4, "r", "p", public_ipv6=ipv6)
-    assert vm.preferred_ip() == ipv6
+    assert vm.preferred_ip() == ipv6, (
+        f"preferred_ip must return IPv6 when present, got {vm.preferred_ip()!r}"
+    )
 
 
 @given(ip_text)
 def test_preferred_ip_falls_back_to_ipv4_when_no_ipv6(ipv4: str):
     vm = VMInstance("1", "n", "running", ipv4, "r", "p", public_ipv6="")
-    assert vm.preferred_ip() == ipv4
-
-
-# ── resolve_token: first non-empty key wins ────────────────────────────────
+    assert vm.preferred_ip() == ipv4, (
+        f"preferred_ip must fall back to IPv4, got {vm.preferred_ip()!r}"
+    )
 
 
 @given(
@@ -92,6 +84,7 @@ def test_preferred_ip_falls_back_to_ipv4_when_no_ipv6(ipv4: str):
     ),
 )
 def test_resolve_token_picks_first_non_empty(pairs):
+    """resolve_token returns the first non-empty value from token_env_keys."""
     from hermes_sandbox.provider import CloudProvider
 
     keys = [k for k, _ in pairs]
@@ -106,15 +99,12 @@ def test_resolve_token_picks_first_non_empty(pairs):
         if env.get(k):
             expected = env[k]
             break
-    assert _Probe.resolve_token(env) == expected
+    assert _Probe.resolve_token(env) == expected, (
+        f"resolve_token must return first non-empty value {expected!r}, "
+        f"got {_Probe.resolve_token(env)!r}"
+    )
 
 
-# ── SandboxConfig.from_env: explicit overrides win ────────────────────────
-
-
-# monkeypatch is function-scoped; hypothesis warns about reusing it across
-# examples.  That's fine here — we overwrite the same keys every time.  Cap
-# examples: this test mutates os.environ, which is slower than pure functions.
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=40)
 @given(
     region=nonempty_text,
@@ -129,12 +119,11 @@ def test_config_from_env_overrides_win(monkeypatch, region, image, instance_type
     monkeypatch.setenv("SANDBOX_IMAGE", image)
     monkeypatch.setenv("SANDBOX_INSTANCE_TYPE", instance_type)
     cfg = SandboxConfig.from_env(dict(os.environ))
-    assert cfg.region == region
-    assert cfg.image == image
-    assert cfg.instance_type == instance_type
-
-
-# ── poll_until: invariant on predicate call count ─────────────────────────
+    assert cfg.region == region, f"SANDBOX_REGION override must win, got {cfg.region!r}"
+    assert cfg.image == image, f"SANDBOX_IMAGE override must win, got {cfg.image!r}"
+    assert cfg.instance_type == instance_type, (
+        f"SANDBOX_INSTANCE_TYPE override must win, got {cfg.instance_type!r}"
+    )
 
 
 @given(st.integers(min_value=1, max_value=20))
@@ -147,27 +136,22 @@ def test_poll_until_calls_predicate_at_least_once(n: int):
 
     sleeps: list[float] = []
     poll_until(pred, interval=0, timeout=1000, sleep=sleeps.append)
-    assert calls["n"] == n
-    # Sleeps happen between tries, never after success: n-1 sleeps.
-    assert len(sleeps) == n - 1
+    assert calls["n"] == n, f"predicate must be called exactly {n} times, got {calls['n']}"
+    assert len(sleeps) == n - 1, f"must sleep between tries ({n - 1} sleeps), got {len(sleeps)}"
 
 
 def test_poll_until_never_sleeps_on_immediate_success():
     sleeps: list[float] = []
     poll_until(lambda: True, interval=5, timeout=1000, sleep=sleeps.append)
-    assert sleeps == []
+    assert sleeps == [], "immediate success must not sleep at all"
 
 
 def test_poll_until_always_raises_on_timeout():
-    # A clock that is already past the deadline after the first check.
     ticks = iter([0.0, 1000.0])
     with pytest.raises(TimeoutError):
         poll_until(
             lambda: False, interval=0, timeout=1, sleep=lambda _: None, clock=lambda: next(ticks)
         )
-
-
-# ── SandboxState: typed persistence roundtrip ──────────────────────────────
 
 
 _state_strategy = st.builds(
@@ -190,14 +174,21 @@ def test_json_state_repository_save_load_roundtrip(state):
     """save() then load() returns an equal SandboxState for any value."""
     repo = JsonStateRepository(Path(mkdtemp()))
     repo.save(state)
-    assert repo.load() == state
+    assert repo.load() == state, (
+        f"roundtrip must yield an equal state, got {repo.load()!r} vs {state!r}"
+    )
 
 
 @given(_state_strategy)
 def test_sandbox_state_touched_advances_last_used_only(state):
     """touched(now) preserves every field except last_used."""
     touched = state.touched(123.0)
-    assert touched.last_used == 123.0
+    assert touched.last_used == 123.0, (
+        f"touched must set last_used to 123.0, got {touched.last_used!r}"
+    )
     for field in dataclasses.fields(state):
         if field.name != "last_used":
-            assert getattr(touched, field.name) == getattr(state, field.name)
+            assert getattr(touched, field.name) == getattr(state, field.name), (
+                f"touched must preserve {field.name}, "
+                f"got {getattr(touched, field.name)!r} vs {getattr(state, field.name)!r}"
+            )
