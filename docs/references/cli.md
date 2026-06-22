@@ -112,6 +112,20 @@ SANDBOX_PROVIDER=dry-run hermes sandbox teardown
 [sandbox] VM torn down.
 ```
 
+## Cleanup
+
+Tear down stray VMs — VMs on the cloud that aren't tracked by any local
+state file.  This happens when a session ends abnormally (crash, kill)
+and the `on_session_end` hook doesn't run.
+
+```shell,script(name="cleanup-none", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox cleanup
+```
+
+```text,verify(script_name="cleanup-none", stream=stdout)
+[sandbox] No stray VMs found.
+```
+
 ## Enable
 
 Set `terminal.backend=ssh` in config.yaml so Hermes' ssh terminal backend is

@@ -110,6 +110,44 @@ def _manager_or_build() -> VMLifecycleManager | None:
     return _manager
 
 
+def _collect_known_vm_ids(manager: VMLifecycleManager) -> set[str]:
+    """Collect VM IDs that local state files and active sessions reference.
+
+    A VM is "known" (not stray) if any of these point at it:
+    - the shared state file (``~/.hermes/sandbox/state.json``)
+    - any isolated-session state file (``~/.hermes/sandbox/sessions/*/state.json``)
+    - an in-memory session manager in ``_sessions``
+    - the singleton manager's own state
+    """
+    known: set[str] = set()
+
+    # Singleton manager's own state.
+    state = manager._repo.load()
+    if state and state.vm_id:
+        known.add(state.vm_id)
+
+    # In-memory isolated sessions.
+    for mgr in _sessions.values():
+        state = mgr._repo.load()
+        if state and state.vm_id:
+            known.add(state.vm_id)
+
+    # Session state files on disk (covers sessions from other processes).
+    sessions_dir = manager.hermes_home / "sandbox" / "sessions"
+    if sessions_dir.exists():
+        for state_file in sessions_dir.glob("*/state.json"):
+            try:
+                import json
+                data = json.loads(state_file.read_text(encoding="utf-8"))
+                vm_id = data.get("vm_id")
+                if vm_id:
+                    known.add(vm_id)
+            except (ValueError, OSError):
+                pass
+
+    return known
+
+
 def _apply_ssh_env(manager: VMLifecycleManager) -> None:
     """Point Hermes' ssh terminal backend at the sandbox VM."""
     env = manager.ssh_env()
@@ -233,6 +271,7 @@ Subcommands:
   teardown    Destroy the recorded sandbox VM
   list        List all sandbox VMs on the cloud
   recreate    Destroy the current VM and provision a fresh one
+  cleanup     Tear down stray VMs not tracked by any session
   enable      Set terminal.backend=ssh in config.yaml (run once)
   help        This message
 
@@ -290,6 +329,16 @@ def _handle_slash(raw_args: str) -> str | None:
         vm = manager.recreate()
         return f"[sandbox] VM ready: {vm.id} @ {vm.preferred_ip()} ({vm.provider})"
 
+    if sub == "cleanup":
+        known = _collect_known_vm_ids(manager)
+        destroyed = manager.cleanup_strays(known)
+        if not destroyed:
+            return "[sandbox] No stray VMs found."
+        lines = ["[sandbox] Cleaned up stray VMs:"]
+        for vm_id in destroyed:
+            lines.append(f"  {vm_id}")
+        return "\n".join(lines)
+
     return f"Unknown subcommand: {sub}\n\n{_HELP}"
 
 
@@ -316,6 +365,7 @@ def _setup_cli(parser: argparse.ArgumentParser) -> None:
     sub.add_parser("teardown", help="Destroy the recorded sandbox VM")
     sub.add_parser("list", help="List all sandbox VMs on the cloud")
     sub.add_parser("recreate", help="Destroy the current VM and provision a fresh one")
+    sub.add_parser("cleanup", help="Tear down stray VMs not tracked by any session")
     sub.add_parser("enable", help="Set terminal.backend=ssh in config.yaml")
     sub.add_parser("available", help="List registered providers")
 
@@ -344,7 +394,7 @@ def register(ctx: Any) -> None:
         "sandbox",
         handler=_handle_slash,
         description="Cloud-VM terminal sandbox: provision/status/teardown.",
-        args_hint="<status|provision|teardown|list|recreate|enable>",
+        args_hint="<status|provision|teardown|list|recreate|cleanup|enable>",
     )
     ctx.register_cli_command(
         "sandbox",
