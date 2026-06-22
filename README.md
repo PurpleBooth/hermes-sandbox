@@ -1,108 +1,182 @@
 # sandbox
 
-A Hermes Agent plugin that spins up a **cloud VM** as the terminal sandbox,
+A Hermes Agent plugin that spins up a cloud VM as your terminal sandbox,
 so Hermes runs shell commands, file edits, and `execute_code` inside an
-isolated, ephemeral machine instead of on your host or in a container.
-Want to do `docker build`, install root packages, or throw experiments at a
-fresh box? This is the path.
+isolated, ephemeral machine instead of on your host.
 
-## How it works
-
-1. On `on_session_start` the plugin provisions (or reuses) a VM on your
-   configured cloud provider.
-2. It writes an ed25519 SSH keypair to `~/.hermes/sandbox/`.
-3. It sets `TERMINAL_ENV=ssh` and the `TERMINAL_SSH_*` env vars so Hermes'
-   built-in **ssh** terminal backend routes every `terminal`, `file`, and
-   `execute_code` call into the VM.
-4. On `on_session_end` the VM is torn down (only if `SANDBOX_AUTO_TEARDOWN_SECONDS>0`);
-   by default the VM is kept warm and reused next session.
-
-The plugin orchestrates Hermes' existing `ssh` backend — no core changes,
-no monkeypatching.
-
-## Providers
-
-| Provider | `SANDBOX_PROVIDER` | Token env var | Default region | Default size |
-|---|---|---|---|---|
-| Hetzner Cloud | `hetzner` | `HCLOUD_TOKEN` | `nbg1` | `cx23` |
-| DigitalOcean | `digitalocean` | `DIGITALOCEAN_TOKEN` (or `DO_API_TOKEN`) | `fra1` | `s-2vcpu-4gb` |
-
-Both providers enable IPv4 **and** IPv6; SSH prefers the IPv6 address when
-present. Adding a provider is one file (`<name>.py`) + the `@register_provider`
-decorator.
+Want to do `docker build`, install root packages, or throw experiments at
+a fresh box? This is the path.
 
 ## Install
 
-```bash
-# 1. Clone the plugin into your Hermes plugins dir.
-git clone https://codeberg.org/PurpleBooth/hermes-sandbox ~/.hermes/plugins/sandbox
+    git clone https://codeberg.org/PurpleBooth/hermes-sandbox ~/.hermes/plugins/sandbox
+    hermes plugins enable sandbox
+    hermes sandbox enable
 
-# 2. Enable it.
-hermes plugins enable sandbox
+The `enable` command sets `terminal.backend=ssh` in config.yaml so Hermes'
+ssh terminal backend is the stable default. Restart Hermes after install.
 
-# 3. Set terminal.backend=ssh so the ssh backend is the stable default.
-hermes sandbox enable     # or: hermes config set terminal.backend ssh
+## Providers
+
+| Provider | `SANDBOX_PROVIDER` | Token | Notes |
+|---|---|---|---|
+| Hetzner Cloud | `hetzner` | `HCLOUD_TOKEN` | Default. EU regions, IPv4+IPv6. |
+| DigitalOcean | `digitalocean` | `DIGITALOCEAN_TOKEN` (or `DO_API_TOKEN`) | Global regions, IPv4+IPv6. |
+| QEMU | `qemu` | none | Local hypervisor. Set `SANDBOX_IMAGE` to a qcow2 path. |
+| Dry-run | `dry-run` | none | In-memory simulation for testing. |
+
+List the providers available on your system:
+
+```shell,script(name="readme-available", expected_exit_code=0)
+hermes sandbox available
 ```
 
-## Configure (in `~/.hermes/.env`)
-
-```bash
-SANDBOX_PROVIDER=hetzner              # hetzner | digitalocean | dry-run
-HCLOUD_TOKEN=...                         # or DIGITALOCEAN_TOKEN / DO_API_TOKEN
-SANDBOX_INSTANCE_TYPE=cx23            # provider-specific
-SANDBOX_REGION=nbg1                   # provider-specific
-SANDBOX_IMAGE=ubuntu-24.04            # provider-specific
-SANDBOX_SSH_USER=root                 # default root (cloud images)
-SANDBOX_NAME=hermes-sandbox           # VM name
-SANDBOX_AUTO_TEARDOWN_SECONDS=0       # 0 = keep across sessions; >0 = teardown on session end
-SANDBOX_MODE=shared                   # shared = one VM for all sessions; isolated = one VM per session
+```text,verify(script_name="readme-available", stream=stdout)
+Registered providers: digitalocean, dry-run, hetzner, qemu
 ```
 
-Restart Hermes after first configuration.
+## Configure
 
-## Use
+Put these in `~/.hermes/.env`:
 
-In a session:
+    SANDBOX_PROVIDER=hetzner              # hetzner | digitalocean | dry-run | qemu
+    HCLOUD_TOKEN=***                       # or DIGITALOCEAN_TOKEN / DO_API_TOKEN
+    SANDBOX_INSTANCE_TYPE=cx23            # provider-specific
+    SANDBOX_REGION=nbg1                   # provider-specific
+    SANDBOX_IMAGE=ubuntu-24.04            # provider-specific
+    SANDBOX_SSH_USER=root                 # default root (cloud images)
+    SANDBOX_NAME=hermes-sandbox           # VM name
+    SANDBOX_AUTO_TEARDOWN_SECONDS=0       # 0 = keep across sessions; >0 = teardown on session end
+    SANDBOX_MODE=shared                   # shared = one VM for all; isolated = one VM per session
 
+Only cloud providers need a token. The `dry-run` and `qemu` providers are
+always configured.
+
+## Check there is no VM yet
+
+Before you start, there is no sandbox VM:
+
+```shell,script(name="readme-status-none", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox status
 ```
-/sandbox status       # show the current sandbox VM
-/sandbox provision    # provision/reuse now
-/sandbox teardown     # destroy the VM
-/sandbox list         # list all sandbox VMs on the cloud
-/sandbox recreate     # destroy the current VM and provision a fresh one
-/sandbox enable       # set terminal.backend=ssh
+
+```text,verify(script_name="readme-status-none", stream=stdout)
+[sandbox] No sandbox VM recorded.
 ```
+
+## Provision a VM
+
+Provision (or reuse) a sandbox VM. The dry-run provider needs no token, so
+you can try it right away:
+
+```shell,script(name="readme-provision", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox provision
+```
+
+```text,verify(script_name="readme-provision", stream=stdout)
+[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+```
+
+## Check the status
+
+See the current sandbox VM:
+
+```shell,script(name="readme-status", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox status | grep -E '"vm_id"|"provider"|"public_ip"'
+```
+
+```text,verify(script_name="readme-status", stream=stdout)
+  "vm_id": "dry-run-1",
+  "provider": "dry-run",
+  "public_ip": "10.0.0.1",
+```
+
+## List all sandbox VMs
+
+Query the cloud for all VMs tagged `hermes-sandbox`:
+
+```shell,script(name="readme-list", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox list
+```
+
+```text,verify(script_name="readme-list", stream=stdout)
+[sandbox] No sandbox VMs found.
+```
+
+## Recreate a broken VM
+
+If a VM is broken or unreachable, destroy it and provision a fresh one:
+
+```shell,script(name="readme-recreate", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox recreate
+```
+
+```text,verify(script_name="readme-recreate", stream=stdout)
+[sandbox] VM ready: dry-run-1 @ 10.0.0.1 (dry-run)
+```
+
+## Tear down
+
+Destroy the sandbox VM when you are done:
+
+```shell,script(name="readme-teardown", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox teardown
+```
+
+```text,verify(script_name="readme-teardown", stream=stdout)
+[sandbox] VM torn down.
+```
+
+Confirm it is gone:
+
+```shell,script(name="readme-status-gone", expected_exit_code=0)
+SANDBOX_PROVIDER=dry-run hermes sandbox status
+```
+
+```text,verify(script_name="readme-status-gone", stream=stdout)
+[sandbox] No sandbox VM recorded.
+```
+
+## Session commands
+
+Inside a Hermes session, use the slash command:
+
+    /sandbox status       # show the current sandbox VM
+    /sandbox provision    # provision/reuse now
+    /sandbox teardown     # destroy the VM
+    /sandbox list         # list all sandbox VMs on the cloud
+    /sandbox recreate     # destroy the current VM and provision a fresh one
+    /sandbox enable       # set terminal.backend=ssh
 
 From the shell:
 
-```
-hermes sandbox status
-hermes sandbox available     # list registered providers
-```
+    hermes sandbox status
+    hermes sandbox available     # list registered providers
+
+## Multiple sessions
+
+Set `SANDBOX_MODE` to control how sessions share VMs:
+
+- **`shared`** (default): one VM for all sessions. The VM is kept warm and
+  reused. State lives at `~/.hermes/sandbox/state.json`.
+- **`isolated`**: one VM per session. Each session provisions its own VM
+  with state at `~/.hermes/sandbox/sessions/<session_id>/state.json`. When
+  a session ends, its VM is torn down (if `SANDBOX_AUTO_TEARDOWN_SECONDS`
+  is greater than zero).
 
 ## State
 
 `~/.hermes/sandbox/state.json` records the current VM so a VM created in a
 previous session is reused. The SSH keypair lives at
-`~/.hermes/sandbox/hermes-sandbox` (`0600`).
+`~/.hermes/sandbox/hermes-sandbox` (private, `0600`) and
+`~/.hermes/sandbox/hermes-sandbox.pub` (public).
 
 ## Develop
 
-```bash
-just test          # pytest with coverage (unit + contract + property-based)
-just lint          # ruff + mypy strict
-just specdown      # end-to-end specs via the test-harness wrapper
-```
+    just test          # pytest with coverage (unit + contract + property-based)
+    just lint          # ruff + mypy strict
+    just specdown      # end-to-end specs (including this README)
+    just check         # full gate: lint + test + specdown
 
-Tests use an in-memory `dry-run` provider and inject fake HTTP for the
-Hetzner/DO REST parsing — no cloud credentials required.
-
-## Architecture notes
-
-- The env-var race (config→env re-bridging) is avoided by setting
-  `terminal.backend: ssh` in `config.yaml` once (`/sandbox enable`); the
-  plugin only fills in `TERMINAL_SSH_*` at runtime after provisioning.
-- The plugin is fail-open: if provisioning fails, the session continues with
-  the host's existing terminal backend. We never crash a user's session
-  because the sandbox couldn't boot.
-- IPv6 is preferred for SSH where assigned; falls back to IPv4.
+Tests use the in-memory `dry-run` provider and inject fake HTTP for the
+Hetzner and DigitalOcean REST parsing — no cloud credentials required.
