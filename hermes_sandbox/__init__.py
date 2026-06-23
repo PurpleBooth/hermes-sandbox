@@ -188,6 +188,37 @@ def _invalidate_cached_terminal_env(task_id: str = "default") -> None:
 # Hooks
 # --------------------------------------------------------------------------- #
 
+# Tools that route through the sandbox VM.  Only these trigger a last_used
+# touch — skill_view, memory, ha_get_state etc. don't use the VM.
+_VM_TOOLS = frozenset(
+    {
+        "terminal",
+        "read_file",
+        "write_file",
+        "patch",
+        "search_files",
+        "execute_code",
+    }
+)
+
+
+def _on_pre_tool_call(tool_name: str = "", session_id: str = "", **_: Any) -> None:
+    """Touch last_used when a VM-backed tool fires.
+
+    Keeps the TTL reaper from tearing down a VM that's actively in use.
+    Only fires for tools that route through the ssh backend (terminal,
+    file, execute_code) — not for skill_view, memory, etc.
+    """
+    if tool_name not in _VM_TOOLS:
+        return
+    manager = _manager_or_build()
+    if manager is None:
+        return
+    try:
+        manager.touch()
+    except Exception as exc:
+        logger.debug("sandbox: touch on tool %s failed: %s", tool_name, exc)
+
 
 def _on_session_start(
     session_id: str = "",
@@ -276,6 +307,7 @@ Subcommands:
   list        List all sandbox VMs on the cloud
   recreate    Destroy the current VM and provision a fresh one
   cleanup     Tear down stray VMs not tracked by any session
+  reap        Tear down the VM if unused for longer than the TTL
   enable      Set terminal.backend=ssh in config.yaml (run once)
   help        This message
 
@@ -343,6 +375,12 @@ def _handle_slash(raw_args: str) -> str | None:
             lines.append(f"  {vm_id}")
         return "\n".join(lines)
 
+    if sub == "reap":
+        reaped = manager.reap_stale()
+        if reaped:
+            return "[sandbox] Stale VM reaped (was unused past TTL)."
+        return "[sandbox] VM is fresh or no TTL configured — nothing to reap."
+
     return f"Unknown subcommand: {sub}\n\n{_HELP}"
 
 
@@ -371,6 +409,7 @@ def _setup_cli(parser: argparse.ArgumentParser) -> None:
     sub.add_parser("list", help="List all sandbox VMs on the cloud")
     sub.add_parser("recreate", help="Destroy the current VM and provision a fresh one")
     sub.add_parser("cleanup", help="Tear down stray VMs not tracked by any session")
+    sub.add_parser("reap", help="Tear down the VM if unused for longer than the TTL")
     sub.add_parser("enable", help="Set terminal.backend=ssh in config.yaml")
     sub.add_parser("available", help="List registered providers")
 
@@ -388,9 +427,51 @@ def _handle_cli(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
+# TTL reaper thread
+# ---------------------------------------------------------------------------#
+
+_REAPER_INTERVAL = 300  # check every 5 minutes
+
+
+def _start_reaper_thread() -> None:
+    """Start a daemon thread that reaps stale sandbox VMs.
+
+    Only starts when ``SANDBOX_VM_TTL_SECONDS > 0``.  Wakes every 5 minutes,
+    reads ``last_used`` from state.json, and tears down the VM if it has been
+    idle longer than the TTL.  Stays silent (just a debug log) when there is
+    nothing to reap.
+    """
+    import threading
+
+    config = _build_config()
+    if config is None or config.vm_ttl_seconds <= 0:
+        return
+
+    def _reap_loop() -> None:
+        while True:
+            manager = _manager_or_build()
+            if manager is not None:
+                try:
+                    manager.reap_stale()
+                except Exception as exc:
+                    logger.debug("sandbox: reaper tick failed: %s", exc)
+            import time
+
+            time.sleep(_REAPER_INTERVAL)
+
+    thread = threading.Thread(target=_reap_loop, daemon=True, name="sandbox-reaper")
+    thread.start()
+    logger.info(
+        "sandbox: started TTL reaper thread (interval=%ds, ttl=%ds)",
+        _REAPER_INTERVAL,
+        config.vm_ttl_seconds,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Plugin registration
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
 
 
 def _eager_wire_ssh_env() -> None:
@@ -417,6 +498,7 @@ def register(ctx: Any) -> None:
     """Plugin entry point: register session hooks, slash + CLI commands."""
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_end", _on_session_end)
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_command(
         "sandbox",
         handler=_handle_slash,
@@ -431,3 +513,4 @@ def register(ctx: Any) -> None:
         description="Provision, inspect, or tear down the cloud-VM sandbox.",
     )
     _eager_wire_ssh_env()
+    _start_reaper_thread()

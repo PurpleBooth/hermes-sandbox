@@ -567,3 +567,99 @@ def test_config_from_env_unregistered_provider_falls_back_to_defaults(monkeypatc
     assert cfg.token == "tok", (
         f"unregistered provider must fall back to SANDBOX_TOKEN, got {cfg.token!r}"
     )
+
+
+# ── reap_stale (TTL-based VM reaping) ─────────────────────────────────────
+
+
+def test_reap_stale_disabled_when_ttl_zero(tmp_path, fake_key_factory):
+    """TTL of 0 means reaping is disabled — VM must survive."""
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    mgr.ensure_vm()
+    assert mgr.reap_stale(0) is False, "ttl_seconds=0 must never reap"
+    assert mgr.state_path.exists(), "state must survive when TTL is disabled"
+
+
+def test_reap_stale_noops_when_no_state(tmp_path, fake_key_factory):
+    """With no VM recorded, reap is a no-op."""
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    assert mgr.reap_stale(3600) is False, "reap with no state must return False"
+
+
+def test_reap_stale_keeps_fresh_vm(tmp_path, fake_key_factory):
+    """A VM used within the TTL window must survive."""
+    now = {"t": 1000.0}
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory, clock=lambda: now["t"])
+    mgr.ensure_vm()
+    # Advance only 60s — well within a 3600s TTL.
+    now["t"] += 60
+    assert mgr.reap_stale(3600) is False, "a fresh VM must not be reaped"
+    assert mgr.state_path.exists(), "state must survive for a fresh VM"
+
+
+def test_reap_stale_tears_down_stale_vm(tmp_path, fake_key_factory):
+    """A VM unused longer than the TTL must be torn down."""
+    now = {"t": 1000.0}
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory, clock=lambda: now["t"])
+    mgr.ensure_vm()
+    # Advance 2 hours — past a 1-hour TTL.
+    now["t"] += 7200
+    assert mgr.reap_stale(3600) is True, "a stale VM must be reaped"
+    assert not mgr.state_path.exists(), "state must be gone after reaping"
+
+
+def test_reap_stale_uses_config_ttl_when_not_passed(tmp_path, fake_key_factory):
+    """reap_stale() with no arg uses config.vm_ttl_seconds."""
+    now = {"t": 1000.0}
+    cfg = SandboxConfig(provider_name="dry-run", token="", ssh_user="root", vm_ttl_seconds=100)
+    mgr = make_manager(
+        tmp_path, config=cfg, fake_key_factory=fake_key_factory, clock=lambda: now["t"]
+    )
+    mgr.ensure_vm()
+    now["t"] += 200
+    assert mgr.reap_stale(100) is True, "stale VM must be reaped using config TTL"
+    assert not mgr.state_path.exists(), "state must be gone after reaping"
+
+
+# ── touch (last_used update on tool calls) ────────────────────────────────
+
+
+def test_touch_updates_last_used(tmp_path, fake_key_factory):
+    """touch() must advance last_used to the current clock time."""
+    now = {"t": 1000.0}
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory, clock=lambda: now["t"])
+    mgr.ensure_vm()
+    original = mgr._repo.load()
+    assert original is not None
+    assert original.last_used == 1000.0
+
+    now["t"] += 500
+    assert mgr.touch() is True, "touch must return True when state exists"
+
+    updated = mgr._repo.load()
+    assert updated is not None
+    assert updated.last_used == 1500.0, (
+        f"last_used must be 1500.0 after touch, got {updated.last_used!r}"
+    )
+
+
+def test_touch_returns_false_when_no_state(tmp_path, fake_key_factory):
+    """touch() must return False when there is no recorded state."""
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory)
+    assert mgr.touch() is False, "touch with no state must return False"
+
+
+def test_touch_prevents_reaping(tmp_path, fake_key_factory):
+    """A VM touched within the TTL window must survive reaping."""
+    now = {"t": 1000.0}
+    mgr = make_manager(tmp_path, fake_key_factory=fake_key_factory, clock=lambda: now["t"])
+    mgr.ensure_vm()
+
+    # Advance past the TTL, then touch to reset last_used.
+    now["t"] += 7200
+    mgr.touch()
+
+    # Advance only 60s — now within a 3600s TTL.
+    now["t"] += 60
+    assert mgr.reap_stale(3600) is False, "a recently touched VM must not be reaped"
+    assert mgr.state_path.exists(), "state must survive when VM was recently touched"
