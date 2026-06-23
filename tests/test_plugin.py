@@ -506,3 +506,91 @@ def test_on_session_end_shared_failopen_on_error(tmp_path, fake_key_factory, mon
 
     monkeypatch.setattr(mgr, "maybe_auto_teardown", explode)
     hermes_sandbox._on_session_end(session_id="s1")
+
+
+# ── Eager wiring on register() ───────────────────────────────────────────
+
+
+def test_register_eagerly_sets_ssh_env_from_existing_state(
+    tmp_path, fake_key_factory, monkeypatch
+):
+    """register() must set TERMINAL_SSH_* from state.json before any hook fires.
+
+    The agent constructor probes the terminal backend during __init__, which
+    runs after plugin discovery but before the first on_session_start hook.
+    If a VM already exists in state.json, register() must wire the env vars
+    eagerly so the probe succeeds.
+    """
+    import os
+
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setattr(hermes_sandbox, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+
+    # Provision a VM so state.json exists and is populated.
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    mgr.ensure_vm()
+
+    # Simulate a fresh process: clear the manager and env vars.
+    monkeypatch.setattr(hermes_sandbox, "_manager", None)
+    for k in ("TERMINAL_ENV", "TERMINAL_SSH_HOST", "TERMINAL_SSH_USER", "TERMINAL_SSH_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+    class FakeCtx:
+        def register_hook(self, name, cb):
+            pass
+
+        def register_command(self, name, handler, description="", args_hint=""):
+            pass
+
+        def register_cli_command(self, name, help="", setup_fn=None, handler_fn=None, description=""):
+            pass
+
+    hermes_sandbox.register(FakeCtx())
+
+    assert os.environ.get("TERMINAL_ENV") == "ssh", (
+        f"register() must eagerly set TERMINAL_ENV=ssh from existing state, "
+        f"got {os.environ.get('TERMINAL_ENV')!r}"
+    )
+    assert os.environ.get("TERMINAL_SSH_HOST"), (
+        "register() must eagerly set TERMINAL_SSH_HOST from existing state"
+    )
+    assert os.environ.get("TERMINAL_SSH_USER") == "root", (
+        f"register() must eagerly set TERMINAL_SSH_USER, "
+        f"got {os.environ.get('TERMINAL_SSH_USER')!r}"
+    )
+
+
+def test_register_does_not_set_ssh_env_when_no_state(tmp_path, monkeypatch):
+    """register() must not set env vars when there's no existing state file.
+
+    On first-ever boot there's no VM to wire up. register() should no-op and
+    let on_session_start handle provisioning on the first turn.
+    """
+    import os
+
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setattr(hermes_sandbox, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+
+    for k in ("TERMINAL_ENV", "TERMINAL_SSH_HOST", "TERMINAL_SSH_USER", "TERMINAL_SSH_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+    class FakeCtx:
+        def register_hook(self, name, cb):
+            pass
+
+        def register_command(self, name, handler, description="", args_hint=""):
+            pass
+
+        def register_cli_command(self, name, help="", setup_fn=None, handler_fn=None, description=""):
+            pass
+
+    hermes_sandbox.register(FakeCtx())
+
+    assert "TERMINAL_ENV" not in os.environ, (
+        "register() must not set TERMINAL_ENV when no state file exists"
+    )

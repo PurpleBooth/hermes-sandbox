@@ -393,6 +393,26 @@ def _handle_cli(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _eager_wire_ssh_env() -> None:
+    """Set TERMINAL_SSH_* from state.json at plugin load time.
+
+    The agent constructor probes the terminal backend during ``__init__``,
+    which runs after plugin discovery but before the first
+    ``on_session_start`` hook.  If a VM already exists in state.json from a
+    previous session, wire the env vars now so the probe succeeds instead
+    of failing with "SSH backend selected but TERMINAL_SSH_HOST not set".
+
+    No cloud API calls — reads only the local state file.  If there is no
+    state file yet (first-ever boot), this is a no-op and ``on_session_start``
+    handles provisioning on the first turn.
+    """
+    manager = _manager_or_build()
+    if manager is None:
+        return
+    _apply_ssh_env(manager)
+    logger.debug("sandbox: eagerly wired SSH env from existing state")
+
+
 def register(ctx: Any) -> None:
     """Plugin entry point: register session hooks, slash + CLI commands."""
     ctx.register_hook("on_session_start", _on_session_start)
@@ -410,3 +430,4 @@ def register(ctx: Any) -> None:
         handler_fn=_handle_cli,
         description="Provision, inspect, or tear down the cloud-VM sandbox.",
     )
+    _eager_wire_ssh_env()
