@@ -32,6 +32,8 @@ class SandboxConfig:
     auto_teardown_seconds: int = 0
     # shared = one VM for all sessions (default); isolated = one VM per session.
     mode: str = "shared"
+    # 0 = no TTL reaping (default); >0 = tear down VM when unused for N seconds.
+    vm_ttl_seconds: int = 0
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> SandboxConfig:
@@ -59,6 +61,7 @@ class SandboxConfig:
             vm_name=_get("SANDBOX_NAME", "hermes-sandbox"),
             auto_teardown_seconds=int(_get("SANDBOX_AUTO_TEARDOWN_SECONDS", "0") or "0"),
             mode=_get("SANDBOX_MODE", "shared"),
+            vm_ttl_seconds=int(_get("SANDBOX_VM_TTL_SECONDS", "0") or "0"),
         )
 
     def is_configured(self) -> bool:

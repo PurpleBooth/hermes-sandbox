@@ -259,6 +259,19 @@ class VMLifecycleManager:
             return False
         return self.teardown()
 
+    def touch(self) -> bool:
+        """Update ``last_used`` to now without provisioning or API calls.
+
+        Called on tool calls that use the VM (terminal, file, execute_code)
+        so the TTL reaper treats the VM as actively in use.  Returns True if
+        state was updated, False if there is no recorded state to touch.
+        """
+        state = self._repo.load()
+        if not state:
+            return False
+        self._repo.save(state.touched(self._clock()))
+        return True
+
     def cleanup_strays(self, known_vm_ids: set[str]) -> list[str]:
         """Tear down cloud VMs not in ``known_vm_ids`` (stray VMs).
 
@@ -278,3 +291,37 @@ class VMLifecycleManager:
                 except Exception as exc:
                     logger.warning("sandbox: could not tear down stray VM %s: %s", vm.id, exc)
         return destroyed
+
+    def reap_stale(self, ttl_seconds: int | None = None) -> bool:
+        """Tear down the VM if it has not been used for the TTL window.
+
+        Reads ``last_used`` from state and compares against the injected clock.
+        If the VM is stale (``now - last_used > ttl_seconds``), tears it down
+        and clears state.  Returns True if the VM was reaped.
+
+        When ``ttl_seconds`` is None, uses ``config.vm_ttl_seconds``.
+        A TTL of 0 means reaping is disabled — always returns False.
+        If there is no recorded state, returns False (nothing to reap).
+        """
+        effective_ttl = self.config.vm_ttl_seconds if ttl_seconds is None else ttl_seconds
+        if effective_ttl <= 0:
+            return False
+        state = self._repo.load()
+        if not state:
+            return False
+        age = self._clock() - state.last_used
+        if age <= effective_ttl:
+            logger.debug(
+                "sandbox: VM %s is %.0fs old (TTL %ds) — keeping",
+                state.vm_id,
+                age,
+                effective_ttl,
+            )
+            return False
+        logger.info(
+            "sandbox: VM %s stale (%.0fs unused, TTL %ds) — reaping",
+            state.vm_id,
+            age,
+            effective_ttl,
+        )
+        return self.teardown()

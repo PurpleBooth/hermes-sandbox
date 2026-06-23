@@ -509,8 +509,6 @@ def test_on_session_end_shared_failopen_on_error(tmp_path, fake_key_factory, mon
 
 
 # ── Eager wiring on register() ───────────────────────────────────────────
-
-
 def test_register_eagerly_sets_ssh_env_from_existing_state(tmp_path, fake_key_factory, monkeypatch):
     """register() must set TERMINAL_SSH_* from state.json before any hook fires.
 
@@ -596,3 +594,48 @@ def test_register_does_not_set_ssh_env_when_no_state(tmp_path, monkeypatch):
     assert "TERMINAL_ENV" not in os.environ, (
         "register() must not set TERMINAL_ENV when no state file exists"
     )
+
+
+# ── pre_tool_call touch ──────────────────────────────────────────────────
+
+
+def test_pre_tool_call_touches_on_terminal_tool(tmp_path, fake_key_factory, monkeypatch):
+    """pre_tool_call must touch last_used when a VM-backed tool fires."""
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    mgr.ensure_vm()
+
+    original = mgr._repo.load()
+    assert original is not None
+
+    import time
+
+    time.sleep(0.01)
+    hermes_sandbox._on_pre_tool_call(tool_name="terminal", session_id="s1")
+
+    updated = mgr._repo.load()
+    assert updated is not None
+    assert updated.last_used > original.last_used, "terminal tool call must advance last_used"
+
+
+def test_pre_tool_call_ignores_non_vm_tool(tmp_path, fake_key_factory, monkeypatch):
+    """pre_tool_call must NOT touch last_used for non-VM tools like skill_view."""
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    mgr.ensure_vm()
+
+    original = mgr._repo.load()
+    assert original is not None
+
+    hermes_sandbox._on_pre_tool_call(tool_name="skill_view", session_id="s1")
+
+    updated = mgr._repo.load()
+    assert updated is not None
+    assert updated.last_used == original.last_used, (
+        "skill_view must not advance last_used (it doesn't use the VM)"
+    )
+
+
+def test_pre_tool_call_failopen_when_unconfigured(monkeypatch):
+    """pre_tool_call must not crash when the plugin is not configured."""
+    hermes_sandbox._on_pre_tool_call(tool_name="terminal", session_id="s1")
