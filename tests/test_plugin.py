@@ -511,9 +511,7 @@ def test_on_session_end_shared_failopen_on_error(tmp_path, fake_key_factory, mon
 # ── Eager wiring on register() ───────────────────────────────────────────
 
 
-def test_register_eagerly_sets_ssh_env_from_existing_state(
-    tmp_path, fake_key_factory, monkeypatch
-):
+def test_register_eagerly_sets_ssh_env_from_existing_state(tmp_path, fake_key_factory, monkeypatch):
     """register() must set TERMINAL_SSH_* from state.json before any hook fires.
 
     The agent constructor probes the terminal backend during __init__, which
@@ -545,7 +543,9 @@ def test_register_eagerly_sets_ssh_env_from_existing_state(
         def register_command(self, name, handler, description="", args_hint=""):
             pass
 
-        def register_cli_command(self, name, help="", setup_fn=None, handler_fn=None, description=""):
+        def register_cli_command(
+            self, name, help="", setup_fn=None, handler_fn=None, description=""
+        ):
             pass
 
     hermes_sandbox.register(FakeCtx())
@@ -586,7 +586,9 @@ def test_register_does_not_set_ssh_env_when_no_state(tmp_path, monkeypatch):
         def register_command(self, name, handler, description="", args_hint=""):
             pass
 
-        def register_cli_command(self, name, help="", setup_fn=None, handler_fn=None, description=""):
+        def register_cli_command(
+            self, name, help="", setup_fn=None, handler_fn=None, description=""
+        ):
             pass
 
     hermes_sandbox.register(FakeCtx())
