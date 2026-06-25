@@ -64,10 +64,10 @@ see the [QEMU task guide](../tasks/qemu-provider.md).
 
 When `SANDBOX_FORWARD_ENV` is set, the named env vars are read from the
 caller's process and injected into the VM via a cloud-init `write_files`
-entry at `/etc/profile.d/sandbox-forwarded-env.sh`.  The file is owned by
-`root:root` with `0600` permissions.  The login shell sources
-`/etc/profile.d/*.sh` automatically, so the values appear in the session
-snapshot on first connect.
+entry at `/etc/environment`.  The file is owned by `root:root` with
+`0644` permissions.  PAM (`pam_env`) reads `/etc/environment` during
+every SSH session, so the values are available in the process
+environment without any shell sourcing or snapshot dependency.
 
 Example: `SANDBOX_FORWARD_ENV=CODEBERG_TOKEN,GITHUB_TOKEN` forwards both
 tokens into the VM so workers running `git clone` / `git push` against

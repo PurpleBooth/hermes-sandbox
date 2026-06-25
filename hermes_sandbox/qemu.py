@@ -133,7 +133,7 @@ def _build_cloud_init_seed(
     :func:`_find_iso_builder` is called to find one on PATH.
 
     ``forward_env`` is passed through to :func:`build_cloud_init_user_data`
-    so forwarded env vars are written to ``/etc/profile.d/`` on the VM.
+    so forwarded env vars are written to ``/etc/environment`` on the VM.
     """
     seed_dir = dest / "cidata"
     seed_dir.mkdir(parents=True, exist_ok=True)
