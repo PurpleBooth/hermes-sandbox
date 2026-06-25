@@ -3,6 +3,7 @@
 import dataclasses
 
 import pytest
+import yaml
 
 from hermes_sandbox.models import VMInstance
 from hermes_sandbox.provider import (
@@ -159,54 +160,332 @@ def test_poll_until_raises_on_timeout():
     assert slept == [], "must never sleep when the deadline already passed after the first check"
 
 
-# ── forward_env → cloud-init write_files ───────────────────────────────────
+# ── helpers ─────────────────────────────────────────────────────────────────
 
 
-def test_build_cloud_init_user_data_without_forward_env_has_no_write_files():
-    """Without forward_env the user-data must NOT contain a write_files block."""
+def _parse_user_data(data: str) -> dict:
+    """Parse cloud-init user-data (strip the ``#cloud-config`` header) into a dict."""
+    return yaml.safe_load(data[len("#cloud-config") :])
+
+
+# ── SSH hardening ────────────────────────────────────────────────────────────
+
+
+def test_build_cloud_init_disables_password_authentication():
+    """Password auth must be disabled at both the cloud-init and sshd levels."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
     data = build_cloud_init_user_data("ssh-ed25519 AAAA")
-    assert "write_files:" not in data, "no write_files block when forward_env is empty"
+    assert "ssh_pwauth: false" in data, "ssh_pwauth must be false (disable password auth)"
+
+    config = _parse_user_data(data)
+    assert config["ssh_pwauth"] is False, "ssh_pwauth must be False in the parsed config"
+
+    sshd_entries = [f for f in config["write_files"] if "sshd_config" in f["path"]]
+    assert len(sshd_entries) == 1, "there must be exactly one sshd drop-in config"
+    assert "PasswordAuthentication no" in sshd_entries[0]["content"], (
+        "sshd config must set PasswordAuthentication no"
+    )
 
 
-def test_build_cloud_init_user_data_with_forward_env_injects_write_files():
-    """forward_env values are injected as a write_files block with 0600 perms."""
+def test_build_cloud_init_blocks_root_login():
+    """Root login over SSH must be explicitly blocked."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    sshd_config = [f for f in config["write_files"] if "sshd_config" in f["path"]][0]
+    assert "PermitRootLogin no" in sshd_config["content"], (
+        "sshd config must set PermitRootLogin no"
+    )
+
+
+def test_build_cloud_init_requires_pubkey_authentication():
+    """Public key authentication must be explicitly enabled."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    sshd_config = [f for f in config["write_files"] if "sshd_config" in f["path"]][0]
+    assert "PubkeyAuthentication yes" in sshd_config["content"], (
+        "sshd config must set PubkeyAuthentication yes"
+    )
+
+
+def test_build_cloud_init_restarts_sshd_before_other_runcmd():
+    """The sshd restart must be the first runcmd entry so hardening is active early."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    assert config["runcmd"][0] == "systemctl restart ssh", (
+        "the first runcmd entry must be 'systemctl restart ssh' (apply SSH hardening early)"
+    )
+
+
+def test_build_cloud_init_user_data_is_valid_yaml():
+    """The generated user-data must parse as valid YAML after the header line."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    data = build_cloud_init_user_data(
+        "ssh-ed25519 AAAA",
+        forward_env={"FOO": "bar"},
+        apt_repos=("deb https://example.com stable main",),
+        extra_packages=("custom-pkg",),
+        setup_commands=("echo done",),
+    )
+    parsed = _parse_user_data(data)
+    assert isinstance(parsed, dict), "parsed cloud-config must be a dict"
+    assert "users" in parsed, "cloud-config must have a users section"
+
+
+def test_build_cloud_init_creates_hermes_user_with_key():
+    """The user-data must create a 'hermes' user with the injected SSH key."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAAKEY"))
+    assert len(config["users"]) == 1, "there must be exactly one user"
+    user = config["users"][0]
+    assert user["name"] == "hermes", f"user must be 'hermes', got {user['name']!r}"
+    assert "ssh-ed25519 AAAAKEY" in user["ssh_authorized_keys"], (
+        "the SSH key must be in the hermes user's authorized_keys"
+    )
+
+
+def test_build_cloud_init_hermes_user_has_sudo():
+    """The hermes user must have passwordless sudo so root operations work."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    user = config["users"][0]
+    assert "NOPASSWD" in user["sudo"], (
+        "the hermes user must have passwordless sudo for root operations"
+    )
+
+
+# ── forward_env → cloud-init write_files ───────────────────────────────────
+
+
+def test_build_cloud_init_without_forward_env_has_no_etc_environment():
+    """Without forward_env the user-data must NOT write /etc/environment."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
+    assert env_files == [], "no /etc/environment entry when forward_env is empty"
+
+
+def test_build_cloud_init_with_forward_env_injects_etc_environment():
+    """forward_env values are written to /etc/environment via write_files."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
     data = build_cloud_init_user_data(
         "ssh-ed25519 AAAA",
         forward_env={"GITHUB_TOKEN": "ghp_secret", "CODEBERG_TOKEN": "cb_secret"},
     )
-    assert "write_files:" in data, "write_files block must be present"
-    assert "/etc/environment" in data, (
-        "the forwarded-env file path must be /etc/environment"
-    )
-    assert "GITHUB_TOKEN=ghp_secret" in data, (
+    config = _parse_user_data(data)
+    env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
+    assert len(env_files) == 1, "there must be exactly one /etc/environment entry"
+    entry = env_files[0]
+    assert "GITHUB_TOKEN=ghp_secret" in entry["content"], (
         "the GITHUB_TOKEN assignment line must be present"
     )
-    assert "CODEBERG_TOKEN=cb_secret" in data, (
+    assert "CODEBERG_TOKEN=cb_secret" in entry["content"], (
         "the CODEBERG_TOKEN assignment line must be present"
     )
-    assert "'0644'" in data, "the environment file must have 0644 permissions"
-    assert "root:root" in data, "the environment file must be owned by root:root"
+    assert entry["permissions"] == "0644", "the environment file must have 0644 permissions"
+    assert entry["owner"] == "root:root", "the environment file must be owned by root:root"
 
 
-def test_build_cloud_init_user_data_forward_env_empty_dict_no_write_files():
-    """An empty forward_env dict must NOT inject a write_files block."""
+def test_build_cloud_init_forward_env_empty_dict_no_etc_environment():
+    """An empty forward_env dict must NOT inject an /etc/environment entry."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env={})
-    assert "write_files:" not in data, (
-        "empty forward_env dict must not inject a write_files block"
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env={}))
+    env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
+    assert env_files == [], "empty forward_env dict must not inject /etc/environment"
+
+
+def test_build_cloud_init_forward_env_none_no_etc_environment():
+    """A None forward_env must NOT inject an /etc/environment entry."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None))
+    env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
+    assert env_files == [], "None forward_env must not inject /etc/environment"
+
+
+def test_build_cloud_init_forward_env_appends_to_existing_write_files():
+    """forward_env appends /etc/environment to the existing write_files (SSH hardening)."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(
+        build_cloud_init_user_data(
+            "ssh-ed25519 AAAA",
+            forward_env={"FOO": "bar"},
+        )
+    )
+    # write_files must contain both the SSH-hardening config AND /etc/environment.
+    paths = [f["path"] for f in config["write_files"]]
+    assert "/etc/ssh/sshd_config.d/99-sandbox-hardening.conf" in paths, (
+        "SSH hardening write_files entry must still be present"
+    )
+    assert "/etc/environment" in paths, (
+        "/etc/environment must be appended when forward_env is set"
     )
 
 
-def test_build_cloud_init_user_data_forward_env_none_no_write_files():
-    """A None forward_env must NOT inject a write_files block."""
+# ── apt_repos → cloud-init apt_sources ──────────────────────────────────────
+
+
+def test_build_cloud_init_without_apt_repos_has_no_apt_sources():
+    """Without apt_repos the user-data must NOT contain an apt_sources key."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None)
-    assert "write_files:" not in data, (
-        "None forward_env must not inject a write_files block"
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    assert "apt_sources" not in config, "no apt_sources key when apt_repos is empty"
+
+
+def test_build_cloud_init_with_apt_repos_injects_apt_sources():
+    """apt_repos lines are injected as apt_sources entries before packages."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    repos = ("deb https://packages.example.com stable main",)
+    data = build_cloud_init_user_data("ssh-ed25519 AAAA", apt_repos=repos)
+    config = _parse_user_data(data)
+    assert "apt_sources" in config, "apt_sources key must be present"
+    assert config["apt_sources"] == [{"source": "deb https://packages.example.com stable main"}], (
+        "apt_sources must contain the repo line"
     )
+
+    # apt_sources must appear before packages so the repos are available.
+    apt_idx = data.index("apt_sources:")
+    pkg_idx = data.index("packages:")
+    assert apt_idx < pkg_idx, "apt_sources must appear before packages in the cloud-config"
+
+
+def test_build_cloud_init_with_multiple_apt_repos():
+    """Multiple apt repos all appear in the apt_sources block."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    repos = (
+        "deb https://packages.example.com stable main",
+        "deb https://apt.example.org focal main",
+    )
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", apt_repos=repos))
+    assert len(config["apt_sources"]) == 2, "both repos must appear in apt_sources"
+    assert config["apt_sources"][0]["source"] == "deb https://packages.example.com stable main"
+    assert config["apt_sources"][1]["source"] == "deb https://apt.example.org focal main"
+
+
+def test_build_cloud_init_empty_apt_repos_no_block():
+    """An empty apt_repos tuple must NOT inject an apt_sources key."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", apt_repos=()))
+    assert "apt_sources" not in config, "empty apt_repos must not inject an apt_sources key"
+
+
+# ── extra_packages → cloud-init packages list ───────────────────────────────
+
+
+def test_build_cloud_init_without_extra_packages_unchanged():
+    """Without extra_packages the user-data contains only the base packages."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    assert "my-custom-tool" not in config["packages"], (
+        "no custom packages when extra_packages is empty"
+    )
+
+
+def test_build_cloud_init_with_extra_packages_appends_to_list():
+    """extra_packages are appended to the packages list (before runcmd)."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(
+        build_cloud_init_user_data(
+            "ssh-ed25519 AAAA",
+            extra_packages=("my-custom-tool", "another-pkg"),
+        )
+    )
+    assert "my-custom-tool" in config["packages"], "first extra package must appear in packages"
+    assert "another-pkg" in config["packages"], "second extra package must appear in packages"
+
+
+def test_build_cloud_init_empty_extra_packages_unchanged():
+    """An empty extra_packages tuple must not add any new package entries."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", extra_packages=()))
+    base = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    assert config["packages"] == base["packages"], (
+        "empty extra_packages must leave packages list unchanged"
+    )
+
+
+# ── setup_commands → cloud-init runcmd list ─────────────────────────────────
+
+
+def test_build_cloud_init_without_setup_commands_unchanged():
+    """Without setup_commands the user-data has no custom runcmd entries."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    assert "echo custom-setup-done" not in config["runcmd"], (
+        "no custom commands when setup_commands is empty"
+    )
+
+
+def test_build_cloud_init_with_setup_commands_appends_to_runcmd():
+    """setup_commands are appended to the runcmd list."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    cmds = ("echo custom-setup-done", "curl -fsSL https://example.com/install.sh | sh")
+    config = _parse_user_data(
+        build_cloud_init_user_data("ssh-ed25519 AAAA", setup_commands=cmds)
+    )
+    assert "echo custom-setup-done" in config["runcmd"], (
+        "first setup command must appear in runcmd"
+    )
+    assert "curl -fsSL https://example.com/install.sh | sh" in config["runcmd"], (
+        "second setup command must appear in runcmd"
+    )
+    # Setup commands must appear after the existing runcmd entries.
+    base = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    base_count = len(base["runcmd"])
+    assert config["runcmd"][base_count:] == list(cmds), (
+        "custom commands must be appended after the existing runcmd entries"
+    )
+
+
+def test_build_cloud_init_empty_setup_commands_unchanged():
+    """An empty setup_commands tuple must not add any new runcmd entries."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", setup_commands=()))
+    base = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    assert config["runcmd"] == base["runcmd"], (
+        "empty setup_commands must leave runcmd list unchanged"
+    )
+
+
+# ── combined injection ─────────────────────────────────────────────────────
+
+
+def test_build_cloud_init_all_injections_together():
+    """apt_repos, extra_packages, and setup_commands can all be set at once."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    data = build_cloud_init_user_data(
+        "ssh-ed25519 AAAA",
+        apt_repos=("deb https://repo.example.com stable main",),
+        extra_packages=("custom-pkg",),
+        setup_commands=("echo done",),
+    )
+    config = _parse_user_data(data)
+    assert "apt_sources" in config, "apt_sources must be present"
+    assert "custom-pkg" in config["packages"], "extra package must be present"
+    assert "echo done" in config["runcmd"], "setup command must be present"
+
+    # Ordering in the serialized YAML: apt_sources → packages → runcmd.
+    assert data.index("apt_sources:") < data.index("packages:"), "repos before packages"
+    assert data.index("packages:") < data.index("runcmd:"), "packages before runcmd"
+    assert data.index("runcmd:") < data.index("echo done"), "runcmd before custom commands"

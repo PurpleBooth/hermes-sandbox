@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
     "Typing :: Typed",
 ]
-dependencies = []  # stdlib only — urllib for cloud REST, ssh-keygen/ssh via subprocess
+dependencies = ["pyyaml>=6"]  # stdlib + PyYAML — urllib for cloud REST, yaml for cloud-init
 
 [project.urls]
 Homepage = "https://codeberg.org/PurpleBooth/hermes-sandbox"
