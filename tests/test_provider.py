@@ -179,17 +179,17 @@ def test_build_cloud_init_user_data_with_forward_env_injects_write_files():
         forward_env={"GITHUB_TOKEN": "ghp_secret", "CODEBERG_TOKEN": "cb_secret"},
     )
     assert "write_files:" in data, "write_files block must be present"
-    assert "/etc/profile.d/sandbox-forwarded-env.sh" in data, (
-        "the forwarded-env profile script path must be in the user-data"
+    assert "/etc/environment" in data, (
+        "the forwarded-env file path must be /etc/environment"
     )
-    assert "export GITHUB_TOKEN='ghp_secret'" in data, (
-        "the GITHUB_TOKEN export line must be present"
+    assert "GITHUB_TOKEN=ghp_secret" in data, (
+        "the GITHUB_TOKEN assignment line must be present"
     )
-    assert "export CODEBERG_TOKEN='cb_secret'" in data, (
-        "the CODEBERG_TOKEN export line must be present"
+    assert "CODEBERG_TOKEN=cb_secret" in data, (
+        "the CODEBERG_TOKEN assignment line must be present"
     )
-    assert "'0600'" in data, "the profile script must have 0600 permissions"
-    assert "root:root" in data, "the profile script must be owned by root:root"
+    assert "'0644'" in data, "the environment file must have 0644 permissions"
+    assert "root:root" in data, "the environment file must be owned by root:root"
 
 
 def test_build_cloud_init_user_data_forward_env_empty_dict_no_write_files():

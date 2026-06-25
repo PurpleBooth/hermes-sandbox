@@ -154,27 +154,30 @@ def build_cloud_init_user_data(
     shell variable after Python's ``str.format`` runs.
 
     When *forward_env* is non-empty, a ``write_files`` entry is injected that
-    writes ``/etc/profile.d/sandbox-forwarded-env.sh`` containing ``export``
-    lines for each name/value pair.  The file is owned by ``root:root`` with
-    ``0600`` permissions so non-root users on the VM cannot read the values.
-    The login shell sources ``/etc/profile.d/*.sh`` automatically, so the
-    session snapshot captures the forwarded values on first connect.
+    writes ``/etc/environment`` with ``KEY=VALUE`` lines for each name/value
+    pair.  ``/etc/environment`` is read by PAM (``pam_env``) during every
+    SSH session, so the forwarded values are injected at the process level
+    — no shell sourcing, login shell, or snapshot dependency required.
+    The file is owned by ``root:root`` with ``0644`` permissions (PAM on
+    some distributions skips files that are group/world-writable, and
+    ``/etc/environment`` is conventionally world-readable since it
+    contains no secrets in standard setups).
     """
     user_data = _CLOUD_INIT_USER_DATA.format(public_key=public_key)
 
     if forward_env:
         content_lines = [
-            f"export {name}='{value}'" for name, value in sorted(forward_env.items())
+            f"{name}={value}" for name, value in sorted(forward_env.items())
         ]
         block = [
             "",
             "write_files:",
-            "  - path: /etc/profile.d/sandbox-forwarded-env.sh",
+            "  - path: /etc/environment",
             "    content: |",
         ]
         for cl in content_lines:
             block.append(f"      {cl}")
-        block.append("    permissions: '0600'")
+        block.append("    permissions: '0644'")
         block.append("    owner: root:root")
         user_data += "\n".join(block) + "\n"
 
