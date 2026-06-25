@@ -254,6 +254,9 @@ class VMLifecycleManager:
             ssh_public_key=kp.public_key,
             labels=labels,
             forward_env=forward_env,
+            apt_repos=self.config.apt_repos,
+            extra_packages=self.config.extra_packages,
+            setup_commands=self.config.setup_commands,
         )
         self._repo.save(SandboxState.for_vm(vm, self.config.ssh_user, self._clock()))
         logger.info("sandbox: provisioned VM %s (%s)", vm.id, vm.preferred_ip())
