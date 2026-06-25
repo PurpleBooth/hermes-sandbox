@@ -76,6 +76,42 @@ GitHub and Codeberg authenticate correctly.
 Values are set at provision time.  Rotating a token requires
 `hermes sandbox recreate`.
 
+## Package and setup customisation
+
+| Variable | Default | Format | Purpose |
+|---|---|---|---|
+| `SANDBOX_APT_REPOS` | *(empty)* | Newline-separated `deb ...` lines | Additional apt repositories injected as `apt_sources` |
+| `SANDBOX_PACKAGES` | *(empty)* | Comma-separated package names | Extra apt packages appended to the `packages` list |
+| `SANDBOX_SETUP_CMDS` | *(empty)* | Newline-separated shell commands | Custom `runcmd` entries appended after the existing ones |
+
+These let you customise the VM at provisioning time without modifying the
+plugin.  All three are additive — the base package list and `runcmd`
+entries installed by the plugin remain unchanged.  Values are written into
+the cloud-config YAML, not evaluated by a shell, so there is no shell
+injection risk.
+
+`SANDBOX_APT_REPOS` must contain one repository per line.  Each line is
+injected as a cloud-init `apt_sources` entry *before* the `packages`
+section, so packages from those repositories are available for
+installation:
+
+    SANDBOX_APT_REPOS=deb https://packages.example.com stable main
+
+`SANDBOX_PACKAGES` is a comma-separated list of additional apt packages
+that are appended to the existing `packages` list:
+
+    SANDBOX_PACKAGES=htop,vim,tmux
+
+`SANDBOX_SETUP_CMDS` contains one shell command per line, appended to the
+`runcmd` section after the plugin's built-in setup commands:
+
+    SANDBOX_SETUP_CMDS=echo custom-setup-done
+    curl -fsSL https://example.com/install.sh | sh
+
+All three can be combined in a single provision.  Changes take effect on
+the next provision — use `hermes sandbox recreate` to apply them to an
+existing VM.
+
 ## Session mode
 
 | Variable | Default | Values |

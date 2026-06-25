@@ -785,3 +785,180 @@ def test_ensure_vm_no_forward_env_when_not_configured(tmp_path, fake_key_factory
     assert vm.extra.get("forward_env") == {}, (
         f"forward_env must be empty dict when not configured, got {vm.extra.get('forward_env')!r}"
     )
+
+
+# ── apt_repos / extra_packages / setup_commands config parsing ─────────────
+
+
+def test_config_apt_repos_defaults_empty(monkeypatch):
+    """Without SANDBOX_APT_REPOS, apt_repos is an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.apt_repos == (), "apt_repos must default to empty tuple"
+
+
+def test_config_apt_repos_parsed_from_env(monkeypatch):
+    """SANDBOX_APT_REPOS is parsed as newline-separated deb lines."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv(
+        "SANDBOX_APT_REPOS",
+        "deb https://packages.example.com stable main\ndeb https://apt.example.org focal main",
+    )
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.apt_repos == (
+        "deb https://packages.example.com stable main",
+        "deb https://apt.example.org focal main",
+    ), f"expected two repo lines, got {cfg.apt_repos!r}"
+
+
+def test_config_apt_repos_single_line(monkeypatch):
+    """A single deb line without a newline works correctly."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_APT_REPOS", "deb https://packages.example.com stable main")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.apt_repos == ("deb https://packages.example.com stable main",), (
+        f"single repo line must yield a 1-tuple, got {cfg.apt_repos!r}"
+    )
+
+
+def test_config_apt_repos_empty_string(monkeypatch):
+    """An empty SANDBOX_APT_REPOS yields an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_APT_REPOS", "")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.apt_repos == (), "empty string must yield empty tuple"
+
+
+def test_config_extra_packages_defaults_empty(monkeypatch):
+    """Without SANDBOX_PACKAGES, extra_packages is an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.extra_packages == (), "extra_packages must default to empty tuple"
+
+
+def test_config_extra_packages_parsed_from_env(monkeypatch):
+    """SANDBOX_PACKAGES is parsed as a comma-separated list."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_PACKAGES", "htop,vim,tmux")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.extra_packages == ("htop", "vim", "tmux"), (
+        f"expected (htop, vim, tmux), got {cfg.extra_packages!r}"
+    )
+
+
+def test_config_extra_packages_trims_whitespace(monkeypatch):
+    """Whitespace around package names is trimmed."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_PACKAGES", " htop , vim , tmux ")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.extra_packages == ("htop", "vim", "tmux"), (
+        f"whitespace must be trimmed, got {cfg.extra_packages!r}"
+    )
+
+
+def test_config_extra_packages_single_name(monkeypatch):
+    """A single package name without a comma works correctly."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_PACKAGES", "htop")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.extra_packages == ("htop",), (
+        f"single package must yield a 1-tuple, got {cfg.extra_packages!r}"
+    )
+
+
+def test_config_extra_packages_empty_string(monkeypatch):
+    """An empty SANDBOX_PACKAGES yields an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_PACKAGES", "")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.extra_packages == (), "empty string must yield empty tuple"
+
+
+def test_config_setup_commands_defaults_empty(monkeypatch):
+    """Without SANDBOX_SETUP_CMDS, setup_commands is an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.setup_commands == (), "setup_commands must default to empty tuple"
+
+
+def test_config_setup_commands_parsed_from_env(monkeypatch):
+    """SANDBOX_SETUP_CMDS is parsed as newline-separated commands."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv(
+        "SANDBOX_SETUP_CMDS",
+        "echo hello\ncurl -fsSL https://example.com/install.sh | sh",
+    )
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.setup_commands == (
+        "echo hello",
+        "curl -fsSL https://example.com/install.sh | sh",
+    ), f"expected two commands, got {cfg.setup_commands!r}"
+
+
+def test_config_setup_commands_single_command(monkeypatch):
+    """A single command without a newline works correctly."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_SETUP_CMDS", "echo hello")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.setup_commands == ("echo hello",), (
+        f"single command must yield a 1-tuple, got {cfg.setup_commands!r}"
+    )
+
+
+def test_config_setup_commands_empty_string(monkeypatch):
+    """An empty SANDBOX_SETUP_CMDS yields an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_SETUP_CMDS", "")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.setup_commands == (), "empty string must yield empty tuple"
+
+
+# ── apt_repos / extra_packages / setup_commands lifecycle threading ────────
+
+
+def test_ensure_vm_passes_apt_repos_to_provider(tmp_path, fake_key_factory):
+    """ensure_vm() passes apt_repos from config through to provision()."""
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        apt_repos=("deb https://repo.example.com stable main",),
+    )
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, config=cfg, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    assert vm.extra.get("apt_repos") == ("deb https://repo.example.com stable main",), (
+        f"apt_repos must be passed through to the provider, got {vm.extra.get('apt_repos')!r}"
+    )
+
+
+def test_ensure_vm_passes_extra_packages_to_provider(tmp_path, fake_key_factory):
+    """ensure_vm() passes extra_packages from config through to provision()."""
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        extra_packages=("htop", "vim"),
+    )
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, config=cfg, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    assert vm.extra.get("extra_packages") == ("htop", "vim"), (
+        f"extra_packages must be passed through to the provider, got {vm.extra.get('extra_packages')!r}"
+    )
+
+
+def test_ensure_vm_passes_setup_commands_to_provider(tmp_path, fake_key_factory):
+    """ensure_vm() passes setup_commands from config through to provision()."""
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        setup_commands=("echo hello",),
+    )
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, config=cfg, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    assert vm.extra.get("setup_commands") == ("echo hello",), (
+        f"setup_commands must be passed through to the provider, got {vm.extra.get('setup_commands')!r}"
+    )
