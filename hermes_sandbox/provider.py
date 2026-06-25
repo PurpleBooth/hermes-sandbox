@@ -47,7 +47,7 @@ users:
       - {public_key}
 
 packages:
-  # ── build essentials ──
+  # -- build essentials --
   - build-essential
   - pkg-config
   - cmake
@@ -57,7 +57,7 @@ packages:
   - libbz2-dev
   - liblzma-dev
   - zlib1g-dev
-  # ── network / transfer / archives ──
+  # -- network / transfer / archives --
   - curl
   - wget
   - git
@@ -69,7 +69,7 @@ packages:
   - zip
   - socat
   - netcat-openbsd
-  # ── shell / text / search ──
+  # -- shell / text / search --
   - jq
   - ripgrep
   - fd-find
@@ -81,14 +81,14 @@ packages:
   - direnv
   - zoxide
   - less
-  # ── languages ──
+  # -- languages --
   - python3-pip
   - python3-venv
   - python3-dev
   - golang-go
   - nodejs
   - npm
-  # ── containers (rootless podman) ──
+  # -- containers (rootless podman) --
   - podman
   - buildah
   - skopeo
@@ -96,19 +96,19 @@ packages:
   - slirp4netns
   - fuse-overlayfs
   - catatonit
-  # ── media / creative ──
+  # -- media / creative --
   - ffmpeg
   - imagemagick
   - poppler-utils
   - tesseract-ocr
   - pandoc
-  # ── audio / TTS support ──
+  # -- audio / TTS support --
   - espeak-ng
   - mpg123
   - sox
   - libsox-fmt-all
   - alsa-utils
-  # ── dev quality / data ──
+  # -- dev quality / data --
   - shellcheck
   - shfmt
   - sqlite3
@@ -123,16 +123,16 @@ runcmd:
   - ln -sf "$(which batcat)" /usr/local/bin/bat
   # Rootless-podman subuid/subgid ranges for the hermes user.
   - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 hermes
-  # uv — fast Python package/venv manager.
+  # uv -- fast Python package/venv manager.
   - curl -LsSf https://astral.sh/uv/install.sh | sh
   # rustup + stable toolchain (current Rust; apt's is stale).
   - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  # yq (mikefarah Go binary — NOT the apt Python yq wrapper).
+  # yq (mikefarah Go binary -- NOT the apt Python yq wrapper).
   - |
     YQ_VER=$(curl -sL https://api.github.com/repos/mikefarah/yq/releases/latest | grep tag_name | cut -d '"' -f4)
     wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${{YQ_VER}}/yq_linux_amd64"
     chmod +x /usr/local/bin/yq
-  # edge-tts — open-source Microsoft Edge TTS (no API key required).
+  # edge-tts -- open-source Microsoft Edge TTS (no API key required).
   - python3 -m pip install --break-system-packages edge-tts
 """
 
