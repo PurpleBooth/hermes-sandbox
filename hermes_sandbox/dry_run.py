@@ -49,6 +49,7 @@ class DryRunProvider(CloudProvider):
         image: str,
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
+        forward_env: dict[str, str] | None = None,
     ) -> VMInstance:
         vm_id = str(uuid.uuid4())
         vm = VMInstance(
@@ -58,7 +59,11 @@ class DryRunProvider(CloudProvider):
             public_ip=self._random_ip(),
             region=region,
             provider=self.name,
-            extra={"labels": labels or {}, "instance_type": instance_type},
+            extra={
+                "labels": labels or {},
+                "instance_type": instance_type,
+                "forward_env": forward_env or {},
+            },
         )
         self._vms[vm_id] = vm
         self.calls.append({"op": "provision", "vm_id": vm_id, "name": name})

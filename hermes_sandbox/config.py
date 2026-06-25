@@ -32,6 +32,9 @@ class SandboxConfig:
     auto_teardown_seconds: int = 0
     # shared = one VM for all sessions (default); isolated = one VM per session.
     mode: str = "shared"
+    # Env var names forwarded from the caller's process into the VM at provision
+    # time via cloud-init write_files (e.g. ("GITHUB_TOKEN", "CODEBERG_TOKEN")).
+    forward_env: tuple[str, ...] = ()
     # 0 = no TTL reaping (default); >0 = tear down VM when unused for N seconds.
     vm_ttl_seconds: int = 0
 
@@ -61,6 +64,11 @@ class SandboxConfig:
             vm_name=_get("SANDBOX_NAME", "hermes-sandbox"),
             auto_teardown_seconds=int(_get("SANDBOX_AUTO_TEARDOWN_SECONDS", "0") or "0"),
             mode=_get("SANDBOX_MODE", "shared"),
+            forward_env=tuple(
+                name.strip()
+                for name in _get("SANDBOX_FORWARD_ENV", "").split(",")
+                if name.strip()
+            ),
             vm_ttl_seconds=int(_get("SANDBOX_VM_TTL_SECONDS", "0") or "0"),
         )
 

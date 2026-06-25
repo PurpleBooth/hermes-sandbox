@@ -56,6 +56,26 @@ see the [QEMU task guide](../tasks/qemu-provider.md).
 |---|---|---|
 | `SANDBOX_AUTO_TEARDOWN_SECONDS` | `0` | `0` = keep VM across sessions; `>0` = tear down on session end |
 
+## Environment forwarding
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SANDBOX_FORWARD_ENV` | *(empty)* | Comma-separated env var names forwarded into the VM at provision time |
+
+When `SANDBOX_FORWARD_ENV` is set, the named env vars are read from the
+caller's process and injected into the VM via a cloud-init `write_files`
+entry at `/etc/profile.d/sandbox-forwarded-env.sh`.  The file is owned by
+`root:root` with `0600` permissions.  The login shell sources
+`/etc/profile.d/*.sh` automatically, so the values appear in the session
+snapshot on first connect.
+
+Example: `SANDBOX_FORWARD_ENV=CODEBERG_TOKEN,GITHUB_TOKEN` forwards both
+tokens into the VM so workers running `git clone` / `git push` against
+GitHub and Codeberg authenticate correctly.
+
+Values are set at provision time.  Rotating a token requires
+`hermes sandbox recreate`.
+
 ## Session mode
 
 | Variable | Default | Values |

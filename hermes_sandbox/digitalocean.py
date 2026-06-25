@@ -90,6 +90,7 @@ class DigitalOceanProvider(RestCloudProvider):
         image: str,
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
+        forward_env: dict[str, str] | None = None,
     ) -> VMInstance:
         """Create a droplet and block until it is active with a public IP."""
         key_id = self._ensure_ssh_key(ssh_public_key)
@@ -103,7 +104,9 @@ class DigitalOceanProvider(RestCloudProvider):
             "backups": False,
             "ipv6": True,
             # DigitalOcean accepts user_data as a plain string (no base64).
-            "user_data": build_cloud_init_user_data(ssh_public_key),
+            "user_data": build_cloud_init_user_data(
+                ssh_public_key, forward_env=forward_env
+            ),
         }
         resp = self._request("POST", "/droplets", self.token, body=body)
         vm = self._to_vm_running_aware(resp.get("droplet", {}))

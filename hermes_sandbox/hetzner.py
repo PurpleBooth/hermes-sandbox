@@ -114,6 +114,7 @@ class HetznerProvider(RestCloudProvider):
         image: str,
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
+        forward_env: dict[str, str] | None = None,
     ) -> VMInstance:
         """Create a server and block until it has a public IPv4."""
         labels = labels or {}
@@ -129,7 +130,9 @@ class HetznerProvider(RestCloudProvider):
             "public_net": {"enable_ipv4": True, "enable_ipv6": True},
             # Hetzner requires user_data to be base64-encoded.
             "user_data": base64.b64encode(
-                build_cloud_init_user_data(ssh_public_key).encode("utf-8")
+                build_cloud_init_user_data(
+                    ssh_public_key, forward_env=forward_env
+                ).encode("utf-8")
             ).decode("ascii"),
         }
         resp = self._request("POST", "/servers", self.token, body=body)
