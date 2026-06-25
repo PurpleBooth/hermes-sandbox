@@ -663,3 +663,125 @@ def test_touch_prevents_reaping(tmp_path, fake_key_factory):
     now["t"] += 60
     assert mgr.reap_stale(3600) is False, "a recently touched VM must not be reaped"
     assert mgr.state_path.exists(), "state must survive when VM was recently touched"
+
+
+# ── forward_env config parsing ─────────────────────────────────────────────
+
+
+def test_config_forward_env_defaults_empty(monkeypatch):
+    """Without SANDBOX_FORWARD_ENV, forward_env is an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.forward_env == (), "forward_env must default to empty tuple"
+
+
+def test_config_forward_env_parsed_from_env(monkeypatch):
+    """SANDBOX_FORWARD_ENV is parsed as a comma-separated list."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_FORWARD_ENV", "GITHUB_TOKEN,CODEBERG_TOKEN")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.forward_env == ("GITHUB_TOKEN", "CODEBERG_TOKEN"), (
+        f"expected (GITHUB_TOKEN, CODEBERG_TOKEN), got {cfg.forward_env!r}"
+    )
+
+
+def test_config_forward_env_trims_whitespace(monkeypatch):
+    """Whitespace around names is trimmed."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_FORWARD_ENV", " GITHUB_TOKEN , CODEBERG_TOKEN ")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.forward_env == ("GITHUB_TOKEN", "CODEBERG_TOKEN"), (
+        f"whitespace must be trimmed, got {cfg.forward_env!r}"
+    )
+
+
+def test_config_forward_env_empty_string(monkeypatch):
+    """An empty SANDBOX_FORWARD_ENV yields an empty tuple."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_FORWARD_ENV", "")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.forward_env == (), "empty string must yield empty tuple"
+
+
+def test_config_forward_env_single_name(monkeypatch):
+    """A single name without a comma works correctly."""
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_FORWARD_ENV", "GITHUB_TOKEN")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.forward_env == ("GITHUB_TOKEN",), (
+        f"single name must yield a 1-tuple, got {cfg.forward_env!r}"
+    )
+
+
+# ── forward_env lifecycle threading ────────────────────────────────────────
+
+
+def test_resolve_forward_env_returns_none_when_not_configured(tmp_path):
+    """_resolve_forward_env returns None when config.forward_env is empty."""
+    mgr = make_manager(tmp_path)
+    assert mgr._resolve_forward_env() is None, (
+        "empty forward_env must return None (no injection)"
+    )
+
+
+def test_resolve_forward_env_reads_from_environ(tmp_path, monkeypatch):
+    """_resolve_forward_env reads values from os.environ for configured names."""
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        forward_env=("GITHUB_TOKEN", "CODEBERG_TOKEN", "MISSING_VAR"),
+    )
+    mgr = make_manager(tmp_path, config=cfg)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_test123")
+    monkeypatch.setenv("CODEBERG_TOKEN", "cb_test456")
+    monkeypatch.delenv("MISSING_VAR", raising=False)
+    resolved = mgr._resolve_forward_env()
+    assert resolved == {"GITHUB_TOKEN": "ghp_test123", "CODEBERG_TOKEN": "cb_test456"}, (
+        f"only present vars must be resolved, got {resolved!r}"
+    )
+
+
+def test_resolve_forward_env_returns_none_when_all_missing(tmp_path, monkeypatch):
+    """_resolve_forward_env returns None when no configured vars are in the env."""
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        forward_env=("MISSING_VAR_1", "MISSING_VAR_2"),
+    )
+    mgr = make_manager(tmp_path, config=cfg)
+    monkeypatch.delenv("MISSING_VAR_1", raising=False)
+    monkeypatch.delenv("MISSING_VAR_2", raising=False)
+    assert mgr._resolve_forward_env() is None, (
+        "all-missing forward_env must return None (no injection)"
+    )
+
+
+def test_ensure_vm_passes_forward_env_to_provider(tmp_path, fake_key_factory, monkeypatch):
+    """ensure_vm() builds forward_env from the environment and passes it to provision()."""
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        forward_env=("GITHUB_TOKEN", "CODEBERG_TOKEN"),
+    )
+    provider = DryRunProvider()
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_lifecycle")
+    monkeypatch.setenv("CODEBERG_TOKEN", "cb_lifecycle")
+    mgr = make_manager(tmp_path, provider=provider, config=cfg, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    assert vm.extra.get("forward_env") == {
+        "GITHUB_TOKEN": "ghp_lifecycle",
+        "CODEBERG_TOKEN": "cb_lifecycle",
+    }, f"forward_env must be passed through to the provider, got {vm.extra.get('forward_env')!r}"
+
+
+def test_ensure_vm_no_forward_env_when_not_configured(tmp_path, fake_key_factory):
+    """ensure_vm() does not set forward_env when config.forward_env is empty."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    assert vm.extra.get("forward_env") == {}, (
+        f"forward_env must be empty dict when not configured, got {vm.extra.get('forward_env')!r}"
+    )

@@ -15,6 +15,7 @@ private :class:`_LiveProbe` (the best-effort liveness result folded into it).
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -149,6 +150,23 @@ class VMLifecycleManager:
 
     # -- core operations ---------------------------------------------------
 
+    def _resolve_forward_env(self) -> dict[str, str] | None:
+        """Build the forwarded-env dict from the process environment.
+
+        Reads each name in ``config.forward_env`` from ``os.environ`` and
+        returns a dict of the names whose values are present (non-empty).
+        Returns ``None`` when ``forward_env`` is empty or no values are set,
+        so providers skip the cloud-init injection block entirely.
+        """
+        if not self.config.forward_env:
+            return None
+        resolved = {
+            name: os.environ[name]
+            for name in self.config.forward_env
+            if os.environ.get(name)
+        }
+        return resolved or None
+
     def status(self) -> SandboxStatus | None:
         """Return the recorded state, refreshed against the provider if alive."""
         state = self._repo.load()
@@ -227,6 +245,7 @@ class VMLifecycleManager:
         # Provision fresh.
         kp = self.keypair()
         labels = {LABEL_KEY: LABEL_VALUE}
+        forward_env = self._resolve_forward_env()
         vm = self.provider.provision(
             name=self.config.vm_name,
             instance_type=self.config.instance_type,
@@ -234,6 +253,7 @@ class VMLifecycleManager:
             image=self.config.image,
             ssh_public_key=kp.public_key,
             labels=labels,
+            forward_env=forward_env,
         )
         self._repo.save(SandboxState.for_vm(vm, self.config.ssh_user, self._clock()))
         logger.info("sandbox: provisioned VM %s (%s)", vm.id, vm.preferred_ip())

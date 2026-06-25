@@ -120,6 +120,7 @@ def _build_cloud_init_seed(
     dest: Path,
     runner: CommandRunner,
     iso_bin: str | None = None,
+    forward_env: dict[str, str] | None = None,
 ) -> Path:
     """Build a cloud-init NoCloud seed ISO containing the SSH public key.
 
@@ -130,10 +131,15 @@ def _build_cloud_init_seed(
 
     ``iso_bin`` overrides the auto-detected binary (for tests).  When None,
     :func:`_find_iso_builder` is called to find one on PATH.
+
+    ``forward_env`` is passed through to :func:`build_cloud_init_user_data`
+    so forwarded env vars are written to ``/etc/profile.d/`` on the VM.
     """
     seed_dir = dest / "cidata"
     seed_dir.mkdir(parents=True, exist_ok=True)
-    (seed_dir / "user-data").write_text(build_cloud_init_user_data(public_key))
+    (seed_dir / "user-data").write_text(
+        build_cloud_init_user_data(public_key, forward_env=forward_env)
+    )
     (seed_dir / "meta-data").write_text(_CLOUD_INIT_META_DATA)
 
     binary = iso_bin or _find_iso_builder()
@@ -256,6 +262,7 @@ class QemuProvider(CloudProvider):
         image: str,
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
+        forward_env: dict[str, str] | None = None,
     ) -> VMInstance:
         """Provision a local QEMU VM and return its :class:`VMInstance` description.
 
@@ -297,7 +304,11 @@ class QemuProvider(CloudProvider):
 
         # Build the cloud-init NoCloud seed ISO for SSH key injection.
         seed_iso = _build_cloud_init_seed(
-            ssh_public_key, self._work_dir / name, self._runner, self._iso_bin
+            ssh_public_key,
+            self._work_dir / name,
+            self._runner,
+            self._iso_bin,
+            forward_env=forward_env,
         )
 
         # QEMU records its daemon PID here so teardown can SIGTERM it directly.

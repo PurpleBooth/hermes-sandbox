@@ -126,6 +126,25 @@ def test_config_from_env_overrides_win(monkeypatch, region, image, instance_type
     )
 
 
+@given(
+    names=st.lists(
+        env_name,
+        min_size=0,
+        max_size=5,
+        unique=True,
+    )
+)
+def test_forward_env_parses_comma_separated(names):
+    """SANDBOX_FORWARD_ENV round-trips through from_env parsing."""
+    raw = ",".join(names)
+    env = {"SANDBOX_PROVIDER": "dry-run", "SANDBOX_FORWARD_ENV": raw}
+    cfg = SandboxConfig.from_env(env)
+    expected = tuple(names) if names else ()
+    assert cfg.forward_env == expected, (
+        f"forward_env must round-trip {raw!r} -> {expected!r}, got {cfg.forward_env!r}"
+    )
+
+
 @given(st.integers(min_value=1, max_value=20))
 def test_poll_until_calls_predicate_at_least_once(n: int):
     calls = {"n": 0}

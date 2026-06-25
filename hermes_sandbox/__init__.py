@@ -22,6 +22,8 @@ Configuration (env vars; put secrets in ``~/.hermes/.env``):
                                     >0 = tear down on session end
   SANDBOX_MODE              shared (default) = one VM for all sessions;
                                     isolated = one VM per session
+  SANDBOX_FORWARD_ENV       Comma-separated env var names forwarded into the VM
+                                    at provision time (e.g. GITHUB_TOKEN,CODEBERG_TOKEN)
 
 The plugin leaves ``terminal.backend`` as ``ssh`` in config.yaml (set via
 ``hermes sandbox enable``) and only manages the SSH connection details

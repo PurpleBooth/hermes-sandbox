@@ -137,7 +137,10 @@ runcmd:
 """
 
 
-def build_cloud_init_user_data(public_key: str) -> str:
+def build_cloud_init_user_data(
+    public_key: str,
+    forward_env: dict[str, str] | None = None,
+) -> str:
     """Return cloud-init user-data that creates the ``hermes`` user.
 
     All providers use this helper so non-root provisioning stays consistent
@@ -149,8 +152,33 @@ def build_cloud_init_user_data(public_key: str) -> str:
     languages, media/TTS tools, modern shell utilities) so the sandbox boots
     ready to work.  The ``${{...}}`` escaping preserves cloud-init's literal
     shell variable after Python's ``str.format`` runs.
+
+    When *forward_env* is non-empty, a ``write_files`` entry is injected that
+    writes ``/etc/profile.d/sandbox-forwarded-env.sh`` containing ``export``
+    lines for each name/value pair.  The file is owned by ``root:root`` with
+    ``0600`` permissions so non-root users on the VM cannot read the values.
+    The login shell sources ``/etc/profile.d/*.sh`` automatically, so the
+    session snapshot captures the forwarded values on first connect.
     """
-    return _CLOUD_INIT_USER_DATA.format(public_key=public_key)
+    user_data = _CLOUD_INIT_USER_DATA.format(public_key=public_key)
+
+    if forward_env:
+        content_lines = [
+            f"export {name}='{value}'" for name, value in sorted(forward_env.items())
+        ]
+        block = [
+            "",
+            "write_files:",
+            "  - path: /etc/profile.d/sandbox-forwarded-env.sh",
+            "    content: |",
+        ]
+        for cl in content_lines:
+            block.append(f"      {cl}")
+        block.append("    permissions: '0600'")
+        block.append("    owner: root:root")
+        user_data += "\n".join(block) + "\n"
+
+    return user_data
 
 
 class CloudProvider(ABC):
@@ -190,12 +218,16 @@ class CloudProvider(ABC):
         image: str,
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
+        forward_env: dict[str, str] | None = None,
     ) -> VMInstance:
         """Create (or reuse) a VM and return its description.
 
         Implementations should block until the VM has a public IP, but may
         return before SSH is fully reachable — the lifecycle manager polls
         readiness separately.
+
+        When *forward_env* is non-empty, the values are injected into the VM
+        at provision time so the login shell environment includes them.
         """
 
     @abstractmethod

@@ -157,3 +157,56 @@ def test_poll_until_raises_on_timeout():
     with pytest.raises(TimeoutError):
         poll_until(lambda: False, interval=0, timeout=1, sleep=slept.append, clock=fake_clock)
     assert slept == [], "must never sleep when the deadline already passed after the first check"
+
+
+# ── forward_env → cloud-init write_files ───────────────────────────────────
+
+
+def test_build_cloud_init_user_data_without_forward_env_has_no_write_files():
+    """Without forward_env the user-data must NOT contain a write_files block."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    data = build_cloud_init_user_data("ssh-ed25519 AAAA")
+    assert "write_files:" not in data, "no write_files block when forward_env is empty"
+
+
+def test_build_cloud_init_user_data_with_forward_env_injects_write_files():
+    """forward_env values are injected as a write_files block with 0600 perms."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    data = build_cloud_init_user_data(
+        "ssh-ed25519 AAAA",
+        forward_env={"GITHUB_TOKEN": "ghp_secret", "CODEBERG_TOKEN": "cb_secret"},
+    )
+    assert "write_files:" in data, "write_files block must be present"
+    assert "/etc/profile.d/sandbox-forwarded-env.sh" in data, (
+        "the forwarded-env profile script path must be in the user-data"
+    )
+    assert "export GITHUB_TOKEN='ghp_secret'" in data, (
+        "the GITHUB_TOKEN export line must be present"
+    )
+    assert "export CODEBERG_TOKEN='cb_secret'" in data, (
+        "the CODEBERG_TOKEN export line must be present"
+    )
+    assert "'0600'" in data, "the profile script must have 0600 permissions"
+    assert "root:root" in data, "the profile script must be owned by root:root"
+
+
+def test_build_cloud_init_user_data_forward_env_empty_dict_no_write_files():
+    """An empty forward_env dict must NOT inject a write_files block."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env={})
+    assert "write_files:" not in data, (
+        "empty forward_env dict must not inject a write_files block"
+    )
+
+
+def test_build_cloud_init_user_data_forward_env_none_no_write_files():
+    """A None forward_env must NOT inject a write_files block."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None)
+    assert "write_files:" not in data, (
+        "None forward_env must not inject a write_files block"
+    )
