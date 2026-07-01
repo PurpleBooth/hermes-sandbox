@@ -108,6 +108,8 @@ packages:
   - sox
   - libsox-fmt-all
   - alsa-utils
+  # -- security: automatic updates --
+  - unattended-upgrades
   # -- dev quality / data --
   - shellcheck
   - shfmt
@@ -117,6 +119,9 @@ packages:
   - graphviz
 
 runcmd:
+  # Enable unattended-upgrades (automatic security updates).
+  - dpkg-reconfigure -f noninteractive unattended-upgrades
+  - systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
   # Canonical binary-name aliases (Ubuntu renames these to avoid conflicts;
   # an agent will call them by their upstream names).
   - ln -sf "$(which fdfind)" /usr/local/bin/fd
