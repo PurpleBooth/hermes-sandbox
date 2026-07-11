@@ -30,14 +30,18 @@ def test_vminstance_is_running():
     )
 
 
-def test_vminstance_preferred_ip_prefers_ipv6():
+def test_vminstance_preferred_ip_prefers_ipv4():
     vm = VMInstance("1", "n", "running", "1.2.3.4", "r", "p", public_ipv6="::1")
-    assert vm.preferred_ip() == "::1", (
-        f"preferred_ip must return IPv6 when present, got {vm.preferred_ip()!r}"
+    assert vm.preferred_ip() == "1.2.3.4", (
+        f"preferred_ip must return IPv4 when present, got {vm.preferred_ip()!r}"
+    )
+    vm6 = VMInstance("1", "n", "running", "", "r", "p", public_ipv6="::1")
+    assert vm6.preferred_ip() == "::1", (
+        f"preferred_ip must fall back to IPv6, got {vm6.preferred_ip()!r}"
     )
     vm4 = VMInstance("1", "n", "running", "1.2.3.4", "r", "p")
     assert vm4.preferred_ip() == "1.2.3.4", (
-        f"preferred_ip must fall back to IPv4, got {vm4.preferred_ip()!r}"
+        f"preferred_ip must return IPv4 when no IPv6, got {vm4.preferred_ip()!r}"
     )
 
 
@@ -263,17 +267,18 @@ def test_build_cloud_init_hermes_user_has_sudo():
 # ── forward_env → cloud-init write_files ───────────────────────────────────
 
 
-def test_build_cloud_init_without_forward_env_has_no_etc_environment():
-    """Without forward_env the user-data must NOT write /etc/environment."""
+def test_build_cloud_init_without_forward_env_has_no_etc_environment_append(tmp_path):
+    """Without forward_env the user-data must NOT append to /etc/environment."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
-    env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
-    assert env_files == [], "no /etc/environment entry when forward_env is empty"
+    data = build_cloud_init_user_data("ssh-ed25519 AAAA")
+    assert "/etc/environment" not in data, (
+        "no /etc/environment append when forward_env is empty"
+    )
 
 
 def test_build_cloud_init_with_forward_env_injects_etc_environment():
-    """forward_env values are written to /etc/environment via write_files."""
+    """forward_env values are appended to /etc/environment via runcmd."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
     data = build_cloud_init_user_data(
@@ -281,39 +286,38 @@ def test_build_cloud_init_with_forward_env_injects_etc_environment():
         forward_env={"GITHUB_TOKEN": "ghp_secret", "CODEBERG_TOKEN": "cb_secret"},
     )
     config = _parse_user_data(data)
+    runcmd_str = " ".join(config["runcmd"])
+    assert "'GITHUB_TOKEN'" in runcmd_str and "'ghp_secret'" in runcmd_str, (
+        "the GITHUB_TOKEN assignment must be in runcmd"
+    )
+    assert "'CODEBERG_TOKEN'" in runcmd_str and "'cb_secret'" in runcmd_str, (
+        "the CODEBERG_TOKEN assignment must be in runcmd"
+    )
+    assert ">> /etc/environment" in runcmd_str, (
+        "runcmd must append to /etc/environment (not clobber it)"
+    )
     env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
-    assert len(env_files) == 1, "there must be exactly one /etc/environment entry"
-    entry = env_files[0]
-    assert "GITHUB_TOKEN=ghp_secret" in entry["content"], (
-        "the GITHUB_TOKEN assignment line must be present"
-    )
-    assert "CODEBERG_TOKEN=cb_secret" in entry["content"], (
-        "the CODEBERG_TOKEN assignment line must be present"
-    )
-    assert entry["permissions"] == "0644", "the environment file must have 0644 permissions"
-    assert entry["owner"] == "root:root", "the environment file must be owned by root:root"
+    assert env_files == [], "no write_files entry for /etc/environment (uses runcmd instead)"
 
 
 def test_build_cloud_init_forward_env_empty_dict_no_etc_environment():
     """An empty forward_env dict must NOT inject an /etc/environment entry."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env={}))
-    env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
-    assert env_files == [], "empty forward_env dict must not inject /etc/environment"
+    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env={})
+    assert "/etc/environment" not in data, "empty forward_env dict must not touch /etc/environment"
 
 
 def test_build_cloud_init_forward_env_none_no_etc_environment():
     """A None forward_env must NOT inject an /etc/environment entry."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None))
-    env_files = [f for f in config["write_files"] if f["path"] == "/etc/environment"]
-    assert env_files == [], "None forward_env must not inject /etc/environment"
+    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None)
+    assert "/etc/environment" not in data, "None forward_env must not touch /etc/environment"
 
 
-def test_build_cloud_init_forward_env_appends_to_existing_write_files():
-    """forward_env appends /etc/environment to the existing write_files (SSH hardening)."""
+def test_build_cloud_init_forward_env_prepends_to_runcmd():
+    """forward_env prepends /etc/environment append to the existing runcmd list."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
     config = _parse_user_data(
@@ -322,13 +326,19 @@ def test_build_cloud_init_forward_env_appends_to_existing_write_files():
             forward_env={"FOO": "bar"},
         )
     )
-    # write_files must contain both the SSH-hardening config AND /etc/environment.
     paths = [f["path"] for f in config["write_files"]]
     assert "/etc/ssh/sshd_config.d/99-sandbox-hardening.conf" in paths, (
         "SSH hardening write_files entry must still be present"
     )
-    assert "/etc/environment" in paths, (
-        "/etc/environment must be appended when forward_env is set"
+    assert "/etc/environment" not in paths, (
+        "/etc/environment must NOT be in write_files (uses runcmd instead)"
+    )
+    first_runcmd = config["runcmd"][0]
+    assert "/etc/environment" in first_runcmd, (
+        "first runcmd entry must append to /etc/environment"
+    )
+    assert "'FOO'" in first_runcmd and "'bar'" in first_runcmd, (
+        "the forwarded var must be in the runcmd"
     )
 
 

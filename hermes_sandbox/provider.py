@@ -221,17 +221,13 @@ def build_cloud_init_user_data(
     root login over SSH is blocked, and sshd is restarted early in ``runcmd``
     so the hardening is active before any other first-boot activity.
 
-    When *forward_env* is non-empty, a ``write_files`` entry for
-    ``/etc/environment`` is appended to the template's existing
-    ``write_files`` block (which already carries the SSH-hardening config).
-    The entry writes ``KEY=VALUE`` lines for each name/value pair.
+    When *forward_env* is non-empty, a ``runcmd`` entry is prepended to the
+    template's existing ``runcmd`` list that appends each forwarded var to
+    ``/etc/environment``.  Appending (rather than ``write_files`` which
+    clobbers) preserves existing system entries like ``PATH`` and ``LANG``.
     ``/etc/environment`` is read by PAM (``pam_env``) during every
     SSH session, so the forwarded values are injected at the process level
     — no shell sourcing, login shell, or snapshot dependency required.
-    The file is owned by ``root:root`` with ``0644`` permissions (PAM on
-    some distributions skips files that are group/world-writable, and
-    ``/etc/environment`` is conventionally world-readable since it
-    contains no secrets in standard setups).
 
     *apt_repos* lines are injected as ``apt_sources`` entries (before the
     ``packages`` list) so the VM can install packages from third-party
@@ -266,17 +262,11 @@ def build_cloud_init_user_data(
         ordered["runcmd"] = config["runcmd"]
 
     if forward_env:
-        content = "".join(
-            f"{name}={value}\n" for name, value in sorted(forward_env.items())
+        append_cmds = "".join(
+            f"printf '%s=%s\\n' {name!r} {value!r} >> /etc/environment\n"
+            for name, value in sorted(forward_env.items())
         )
-        ordered["write_files"].append(
-            {
-                "path": "/etc/environment",
-                "content": content,
-                "permissions": "0644",
-                "owner": "root:root",
-            }
-        )
+        ordered["runcmd"] = [append_cmds, *ordered["runcmd"]]
 
     return _dump_cloud_config(ordered)
 
@@ -370,14 +360,22 @@ def poll_until(
     seconds.  ``sleep`` and ``clock`` are injectable so the poll loop can be
     exercised in tests without real waiting.  The predicate is always called at
     least once before sleeping.
+
+    The sleep duration is reduced by the time the predicate itself took, so
+    slow API calls inside the predicate don't consume the entire timeout
+    budget.  If the predicate took longer than ``interval``, no sleep occurs.
     """
     deadline = clock() + timeout
     while True:
+        pre = clock()
         if predicate():
             return
-        if clock() >= deadline:
+        post = clock()
+        if post >= deadline:
             raise TimeoutError(f"poll_until: condition not met within {timeout}s")
-        sleep(interval)
+        predicate_duration = post - pre
+        remaining_sleep = max(0.0, interval - predicate_duration)
+        sleep(min(remaining_sleep, deadline - post))
 
 
 # --------------------------------------------------------------------------- #

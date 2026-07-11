@@ -30,6 +30,20 @@ from .state import JsonStateRepository, SandboxState, StateRepository
 
 logger = logging.getLogger(__name__)
 
+# Default SSH probe — referenced lazily by VMLifecycleManager so tests can
+# patch hermes_sandbox.ssh_util.wait_for_ssh at the module level.
+_DEFAULT_SSH_PROBE: Callable[..., bool] | None = None
+
+
+def _resolve_default_ssh_probe() -> Callable[..., bool]:
+    """Return the default SSH probe, importing lazily so tests can patch it."""
+    global _DEFAULT_SSH_PROBE
+    if _DEFAULT_SSH_PROBE is None:
+        from .ssh_util import wait_for_ssh
+
+        _DEFAULT_SSH_PROBE = wait_for_ssh
+    return _DEFAULT_SSH_PROBE
+
 LABEL_KEY = "hermes-sandbox"
 LABEL_VALUE = "true"
 
@@ -96,6 +110,7 @@ class VMLifecycleManager:
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
         state_repo: StateRepository | None = None,
+        ssh_probe: Callable[..., bool] | None = None,
     ) -> None:
         self.provider = provider
         self.config = config
@@ -103,6 +118,7 @@ class VMLifecycleManager:
         self._key_factory = key_factory
         self._clock = clock
         self._sleep = sleep
+        self._ssh_probe = ssh_probe or _resolve_default_ssh_probe()
         self._repo: StateRepository = state_repo or JsonStateRepository(
             self.hermes_home / "sandbox"
         )
@@ -147,6 +163,33 @@ class VMLifecycleManager:
             "TERMINAL_SSH_KEY": key_path,
             **({"TERMINAL_SSH_PORT": str(state.ssh_port)} if state.ssh_port != 22 else {}),
         }
+
+    # -- ssh readiness ------------------------------------------------------
+
+    def _probe_ssh(self, vm: VMInstance, *, timeout: int = 60) -> bool:
+        """Poll until the VM's SSH daemon is reachable, or ``timeout`` elapses.
+
+        A VM may be ``running`` (cloud API says the kernel booted) but not yet
+        ready for SSH — cloud-init may still be installing our key, or sshd
+        may not have started.  This blocks until a real SSH connection
+        succeeds so the caller doesn't hand a half-booted VM to the agent.
+
+        Uses the injectable ``_ssh_probe`` (defaults to :func:`wait_for_ssh`)
+        so tests can substitute a no-op.  Returns True on success, False on
+        timeout — callers log and proceed (fail-open) rather than crashing.
+        """
+        host = vm.preferred_ip()
+        if not host:
+            logger.warning("sandbox: cannot probe SSH — VM %s has no IP", vm.id)
+            return False
+        key_path = str(self._repo.key_dir / "hermes-sandbox")
+        return self._ssh_probe(
+            host=host,
+            user=self.config.ssh_user,
+            key_path=key_path,
+            port=vm.extra.get("ssh_port", 22),
+            timeout=timeout,
+        )
 
     # -- core operations ---------------------------------------------------
 
@@ -226,13 +269,24 @@ class VMLifecycleManager:
             try:
                 vm = self.provider.get(state.vm_id)
                 if vm.is_running() and vm.preferred_ip():
-                    logger.info(
-                        "sandbox: reusing existing VM %s (%s)",
-                        vm.id,
-                        vm.preferred_ip(),
-                    )
-                    self._repo.save(state.touched(self._clock()))
-                    return vm
+                    # Bug 4: "running" ≠ SSH-reachable.  Verify the SSH daemon
+                    # is actually up before reusing — sshd may have crashed or
+                    # cloud-init may not have finished on a recent reboot.
+                    if not self._probe_ssh(vm, timeout=30):
+                        logger.warning(
+                            "sandbox: recorded VM %s is running but SSH is not "
+                            "reachable — reprovisioning",
+                            vm.id,
+                        )
+                        self._repo.clear()
+                    else:
+                        logger.info(
+                            "sandbox: reusing existing VM %s (%s)",
+                            vm.id,
+                            vm.preferred_ip(),
+                        )
+                        self._repo.save(state.touched(self._clock()))
+                        return vm
                 logger.info(
                     "sandbox: recorded VM %s not running (status=%s) — reprovisioning",
                     vm.id,
@@ -258,6 +312,16 @@ class VMLifecycleManager:
             extra_packages=self.config.extra_packages,
             setup_commands=self.config.setup_commands,
         )
+        # Bug 1: the provider polls until the cloud API says "running", but
+        # the SSH daemon may not be ready yet (cloud-init still running,
+        # sshd not started).  Block until SSH is actually reachable so the
+        # agent doesn't get "Connection refused" on its first command.
+        if not self._probe_ssh(vm, timeout=120):
+            logger.warning(
+                "sandbox: VM %s provisioned but SSH not reachable after 120s "
+                "— proceeding anyway (agent will retry)",
+                vm.id,
+            )
         self._repo.save(SandboxState.for_vm(vm, self.config.ssh_user, self._clock()))
         logger.info("sandbox: provisioned VM %s (%s)", vm.id, vm.preferred_ip())
         return vm

@@ -18,7 +18,11 @@ if str(REPO_ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def _clean_terminal_env(monkeypatch):
-    """Strip any leftover TERMINAL_* env so tests start from a clean slate."""
+    """Strip any leftover TERMINAL_* env so tests start from a clean slate.
+
+    Also patches wait_for_ssh to a no-op so tests using DryRunProvider
+    don't hang trying to SSH to a fake 10.x.x.x address.
+    """
     for k in list(os.environ):
         if (
             k.startswith("TERMINAL_")
@@ -31,6 +35,12 @@ def _clean_terminal_env(monkeypatch):
             }
         ):
             monkeypatch.delenv(k, raising=False)
+    # Patch the default SSH probe so tests using DryRunProvider don't hang
+    # trying to SSH to a fake 10.x.x.x address. Tests that need to assert on
+    # probe behaviour pass ssh_probe= explicitly to VMLifecycleManager.
+    import hermes_sandbox.lifecycle as _lifecycle
+
+    monkeypatch.setattr(_lifecycle, "_DEFAULT_SSH_PROBE", lambda **kwargs: True)
     yield
 
 
@@ -57,3 +67,9 @@ def fake_key_factory(tmp_path):
         )
 
     return _factory
+
+
+@pytest.fixture
+def fake_ssh_probe():
+    """A no-op SSH probe that always reports the VM as reachable."""
+    return lambda **kwargs: True
