@@ -20,6 +20,7 @@ def _make_manager(tmp_path, fake_key_factory):
         config=config,
         hermes_home=hermes_home,
         key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: True,
     )
 
 
@@ -149,7 +150,8 @@ def test_on_session_end_teardowns_when_auto(tmp_path, fake_key_factory, monkeypa
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
     mgr = VMLifecycleManager(
-        provider=provider, config=config, hermes_home=hermes_home, key_factory=fake_key_factory
+        provider=provider, config=config, hermes_home=hermes_home, key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: True,
     )
     monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
     mgr.ensure_vm()
@@ -529,8 +531,10 @@ def test_register_eagerly_sets_ssh_env_from_existing_state(tmp_path, fake_key_fa
     monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
     mgr.ensure_vm()
 
-    # Simulate a fresh process: clear the manager and env vars.
-    monkeypatch.setattr(hermes_sandbox, "_manager", None)
+    # Simulate a fresh process: clear env vars but keep the manager
+    # (the real _build_manager would re-create a provider that talks to
+    # the cloud API and finds the VM by ID; DryRunProvider is in-memory
+    # only, so we keep the same manager instance).
     for k in ("TERMINAL_ENV", "TERMINAL_SSH_HOST", "TERMINAL_SSH_USER", "TERMINAL_SSH_KEY"):
         monkeypatch.delenv(k, raising=False)
 

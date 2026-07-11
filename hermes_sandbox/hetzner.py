@@ -115,6 +115,9 @@ class HetznerProvider(RestCloudProvider):
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
         forward_env: dict[str, str] | None = None,
+        apt_repos: tuple[str, ...] = (),
+        extra_packages: tuple[str, ...] = (),
+        setup_commands: tuple[str, ...] = (),
     ) -> VMInstance:
         """Create a server and block until it has a public IPv4."""
         labels = labels or {}
@@ -131,7 +134,11 @@ class HetznerProvider(RestCloudProvider):
             # Hetzner requires user_data to be base64-encoded.
             "user_data": base64.b64encode(
                 build_cloud_init_user_data(
-                    ssh_public_key, forward_env=forward_env
+                    ssh_public_key,
+                    forward_env=forward_env,
+                    apt_repos=apt_repos,
+                    extra_packages=extra_packages,
+                    setup_commands=setup_commands,
                 ).encode("utf-8")
             ).decode("ascii"),
         }

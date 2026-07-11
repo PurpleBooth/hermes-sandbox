@@ -55,8 +55,14 @@ class VMInstance:
         return self.status.lower() in self._RUNNING_STATUSES
 
     def preferred_ip(self) -> str:
-        """Return the SSH target address — IPv6 preferred, IPv4 fallback."""
-        return self.public_ipv6 or self.public_ip
+        """Return the SSH target address — IPv4 preferred, IPv6 fallback.
+
+        IPv4 is preferred because many networks (Kubernetes pods, corporate
+        VPNs, some home networks) lack IPv6 connectivity.  An IPv6-only
+        SSH target on such networks hangs for the full ConnectTimeout
+        before failing, even though IPv4 would have worked immediately.
+        """
+        return self.public_ip or self.public_ipv6
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict (round-trips via :meth:`from_dict`)."""
