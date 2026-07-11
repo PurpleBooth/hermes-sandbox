@@ -218,7 +218,11 @@ def _on_pre_tool_call(tool_name: str = "", session_id: str = "", **_: Any) -> No
     """
     if tool_name not in _VM_TOOLS:
         return
-    manager = _manager_or_build()
+    try:
+        manager = _manager_or_build()
+    except Exception as exc:
+        logger.debug("sandbox: manager build on tool %s failed: %s", tool_name, exc)
+        return
     if manager is None:
         return
     try:
