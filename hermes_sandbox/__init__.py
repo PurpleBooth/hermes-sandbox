@@ -485,10 +485,13 @@ def _eager_wire_ssh_env() -> None:
     previous session, wire the env vars now so the probe succeeds instead
     of failing with "SSH backend selected but TERMINAL_SSH_HOST not set".
 
-    Always sets ``TERMINAL_ENV=ssh`` when there's recorded state, so the
-    agent uses the SSH backend even if the probe fails — the probe failure
-    just means ``on_session_start`` will reprovision.  Without this, the
-    agent falls back to ``local`` and runs commands on the pod itself.
+    The SSH env vars are set from the recorded state *before* the liveness
+    check so the agent probe always finds them populated.  If the VM turns
+    out to be dead, ``on_session_start`` will reprovision and update the
+    host.  Setting ``TERMINAL_ENV=ssh`` without the accompanying
+    ``TERMINAL_SSH_HOST`` / ``TERMINAL_SSH_USER`` leaves the agent in a
+    broken state where it can neither connect (no host) nor fall back to
+    local (backend is ssh).
     """
     manager = _manager_or_build()
     if manager is None:
@@ -496,15 +499,27 @@ def _eager_wire_ssh_env() -> None:
     state = manager._repo.load()
     if not state or not state.vm_id:
         return
-    # Always select the ssh backend — even if the VM is dead, we don't
-    # want the agent running commands on the pod. on_session_start will
-    # provision a new VM and update the SSH host details.
+    # Wire SSH env vars from recorded state immediately — the agent
+    # constructor probes the terminal backend before on_session_start
+    # fires, so the vars must be present even if the VM is stale.
+    # on_session_start will reprovision if the VM is actually dead.
+    _apply_ssh_env(manager)
     os.environ["TERMINAL_ENV"] = "ssh"
+    logger.debug("sandbox: eagerly wired SSH env from existing state")
+
+    # Best-effort liveness check — log a warning if the VM is dead so
+    # the user knows on_session_start will reprovision, but don't undo
+    # the env vars we just set.
     try:
         vm = manager.provider.get(state.vm_id)
     except Exception:
         return
     if not vm.is_running() or not vm.preferred_ip():
+        logger.warning(
+            "sandbox: recorded VM %s is not running — "
+            "on_session_start will reprovision",
+            state.vm_id,
+        )
         return
     if not manager._probe_ssh(vm, timeout=10):
         logger.warning(
@@ -512,9 +527,6 @@ def _eager_wire_ssh_env() -> None:
             "on_session_start will reprovision",
             vm.id,
         )
-        return
-    _apply_ssh_env(manager)
-    logger.debug("sandbox: eagerly wired SSH env from existing state")
 
 
 def register(ctx: Any) -> None:

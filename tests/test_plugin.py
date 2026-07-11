@@ -600,6 +600,122 @@ def test_register_does_not_set_ssh_env_when_no_state(tmp_path, monkeypatch):
     )
 
 
+def test_register_eagerly_sets_ssh_env_even_when_vm_is_dead(
+    tmp_path, fake_key_factory, monkeypatch
+):
+    """register() must set TERMINAL_SSH_HOST/USER even when the recorded VM is dead.
+
+    The agent constructor probes the terminal backend during __init__, before
+    on_session_start fires.  If a VM exists in state.json but is no longer
+    running, the env vars must still be populated from the recorded state so
+    the probe doesn't fail with "SSH environment requires ssh_host and ssh_user
+    to be configured".  on_session_start will reprovision if the VM is dead.
+    """
+    import dataclasses
+    import os
+
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setattr(hermes_sandbox, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    mgr.ensure_vm()
+
+    # Simulate the VM dying: mark it as "off" in the provider's in-memory store.
+    state = mgr._repo.load()
+    assert state is not None and state.vm_id
+    assert isinstance(mgr.provider, DryRunProvider)
+    dead_vm = dataclasses.replace(mgr.provider.get(state.vm_id), status="off")
+    mgr.provider._vms[state.vm_id] = dead_vm
+
+    # Simulate a fresh process: clear env vars.
+    for k in ("TERMINAL_ENV", "TERMINAL_SSH_HOST", "TERMINAL_SSH_USER", "TERMINAL_SSH_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+    class FakeCtx:
+        def register_hook(self, name, cb):
+            pass
+
+        def register_command(self, name, handler, description="", args_hint=""):
+            pass
+
+        def register_cli_command(
+            self, name, help="", setup_fn=None, handler_fn=None, description=""
+        ):
+            pass
+
+    hermes_sandbox.register(FakeCtx())
+
+    assert os.environ.get("TERMINAL_ENV") == "ssh", (
+        "register() must set TERMINAL_ENV=ssh even when the recorded VM is dead"
+    )
+    assert os.environ.get("TERMINAL_SSH_HOST"), (
+        "register() must set TERMINAL_SSH_HOST from recorded state "
+        "even when the VM is dead — the agent probe needs it"
+    )
+    assert os.environ.get("TERMINAL_SSH_USER"), (
+        "register() must set TERMINAL_SSH_USER from recorded state "
+        "even when the VM is dead — the agent probe needs it"
+    )
+
+
+def test_register_eagerly_sets_ssh_env_when_provider_api_fails(
+    tmp_path, fake_key_factory, monkeypatch
+):
+    """register() must set TERMINAL_SSH_* even when the provider API call fails.
+
+    If the cloud API is down at startup, the liveness check can't run, but the
+    env vars must still be set from state.json so the agent probe doesn't fail.
+    """
+    import os
+
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    monkeypatch.setattr(hermes_sandbox, "_get_hermes_home", lambda: hermes_home)
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+
+    mgr = _make_manager(tmp_path, fake_key_factory)
+    monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
+    mgr.ensure_vm()
+
+    # Make provider.get() raise to simulate a cloud API outage.
+    def boom(vm_id):
+        raise RuntimeError("cloud API is down")
+
+    monkeypatch.setattr(mgr.provider, "get", boom)
+
+    for k in ("TERMINAL_ENV", "TERMINAL_SSH_HOST", "TERMINAL_SSH_USER", "TERMINAL_SSH_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+    class FakeCtx:
+        def register_hook(self, name, cb):
+            pass
+
+        def register_command(self, name, handler, description="", args_hint=""):
+            pass
+
+        def register_cli_command(
+            self, name, help="", setup_fn=None, handler_fn=None, description=""
+        ):
+            pass
+
+    hermes_sandbox.register(FakeCtx())
+
+    assert os.environ.get("TERMINAL_ENV") == "ssh", (
+        "register() must set TERMINAL_ENV=ssh even when the provider API is down"
+    )
+    assert os.environ.get("TERMINAL_SSH_HOST"), (
+        "register() must set TERMINAL_SSH_HOST from recorded state "
+        "even when the provider API is down"
+    )
+    assert os.environ.get("TERMINAL_SSH_USER"), (
+        "register() must set TERMINAL_SSH_USER from recorded state "
+        "even when the provider API is down"
+    )
+
+
 # ── pre_tool_call touch ──────────────────────────────────────────────────
 
 
