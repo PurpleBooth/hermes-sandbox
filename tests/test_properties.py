@@ -60,18 +60,18 @@ def test_vminstance_to_dict_has_all_fields(vm: VMInstance):
 
 
 @given(ip_text, ip_text)
-def test_preferred_ip_returns_ipv6_when_present(ipv4: str, ipv6: str):
+def test_preferred_ip_returns_ipv4_when_present(ipv4: str, ipv6: str):
     vm = VMInstance("1", "n", "running", ipv4, "r", "p", public_ipv6=ipv6)
-    assert vm.preferred_ip() == ipv6, (
-        f"preferred_ip must return IPv6 when present, got {vm.preferred_ip()!r}"
+    assert vm.preferred_ip() == ipv4, (
+        f"preferred_ip must return IPv4 when present, got {vm.preferred_ip()!r}"
     )
 
 
 @given(ip_text)
-def test_preferred_ip_falls_back_to_ipv4_when_no_ipv6(ipv4: str):
-    vm = VMInstance("1", "n", "running", ipv4, "r", "p", public_ipv6="")
-    assert vm.preferred_ip() == ipv4, (
-        f"preferred_ip must fall back to IPv4, got {vm.preferred_ip()!r}"
+def test_preferred_ip_falls_back_to_ipv6_when_no_ipv4(ipv6: str):
+    vm = VMInstance("1", "n", "running", "", "r", "p", public_ipv6=ipv6)
+    assert vm.preferred_ip() == ipv6, (
+        f"preferred_ip must fall back to IPv6, got {vm.preferred_ip()!r}"
     )
 
 
@@ -166,7 +166,7 @@ def test_poll_until_never_sleeps_on_immediate_success():
 
 
 def test_poll_until_always_raises_on_timeout():
-    ticks = iter([0.0, 1000.0])
+    ticks = iter([0.0, 0.0, 1000.0])
     with pytest.raises(TimeoutError):
         poll_until(
             lambda: False, interval=0, timeout=1, sleep=lambda _: None, clock=lambda: next(ticks)

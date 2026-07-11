@@ -24,127 +24,187 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+import yaml
+
 from .models import ApiError, VMInstance
 
 # Signature of the injectable HTTP request function used by REST providers.
 # (method, path, token, body, timeout) -> parsed JSON dict.
 RequestFn = Callable[..., dict[str, Any]]
 
-#: cloud-init template: creates a non-root ``hermes`` user with passwordless
-#: sudo and the injected SSH key, and pre-installs the toolchain a coding /
-#: research / creative AI agent is likely to invoke.  Every provider uses this
-#: so the sandbox never connects as (or runs commands as) ``root`` and boots
-#: ready to work on first SSH.
-_CLOUD_INIT_USER_DATA = """\
-#cloud-config
-package_update: true
 
-users:
-  - name: hermes
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-    ssh_authorized_keys:
-      - {public_key}
+def _base_packages() -> list[str]:
+    """Return the curated package list installed on every sandbox VM."""
+    return [
+        # -- build essentials --
+        "build-essential",
+        "pkg-config",
+        "cmake",
+        "libssl-dev",
+        "libffi-dev",
+        "libsqlite3-dev",
+        "libbz2-dev",
+        "liblzma-dev",
+        "zlib1g-dev",
+        # -- network / transfer / archives --
+        "curl",
+        "wget",
+        "git",
+        "rsync",
+        "openssh-client",
+        "ca-certificates",
+        "gnupg",
+        "unzip",
+        "zip",
+        "socat",
+        "netcat-openbsd",
+        # -- shell / text / search --
+        "jq",
+        "ripgrep",
+        "fd-find",
+        "fzf",
+        "bat",
+        "eza",
+        "tree",
+        "tmux",
+        "direnv",
+        "zoxide",
+        "less",
+        # -- languages --
+        "python3-pip",
+        "python3-venv",
+        "python3-dev",
+        "golang-go",
+        "nodejs",
+        "npm",
+        # -- containers (rootless podman) --
+        "podman",
+        "buildah",
+        "skopeo",
+        "uidmap",
+        "slirp4netns",
+        "fuse-overlayfs",
+        "catatonit",
+        # -- media / creative --
+        "ffmpeg",
+        "imagemagick",
+        "poppler-utils",
+        "tesseract-ocr",
+        "pandoc",
+        # -- audio / TTS support --
+        "espeak-ng",
+        "mpg123",
+        "sox",
+        "libsox-fmt-all",
+        "alsa-utils",
+        # -- security: automatic updates --
+        "unattended-upgrades",
+        # -- dev quality / data --
+        "shellcheck",
+        "shfmt",
+        "sqlite3",
+        "gh",
+        "htop",
+        "graphviz",
+    ]
 
-packages:
-  # -- build essentials --
-  - build-essential
-  - pkg-config
-  - cmake
-  - libssl-dev
-  - libffi-dev
-  - libsqlite3-dev
-  - libbz2-dev
-  - liblzma-dev
-  - zlib1g-dev
-  # -- network / transfer / archives --
-  - curl
-  - wget
-  - git
-  - rsync
-  - openssh-client
-  - ca-certificates
-  - gnupg
-  - unzip
-  - zip
-  - socat
-  - netcat-openbsd
-  # -- shell / text / search --
-  - jq
-  - ripgrep
-  - fd-find
-  - fzf
-  - bat
-  - eza
-  - tree
-  - tmux
-  - direnv
-  - zoxide
-  - less
-  # -- languages --
-  - python3-pip
-  - python3-venv
-  - python3-dev
-  - golang-go
-  - nodejs
-  - npm
-  # -- containers (rootless podman) --
-  - podman
-  - buildah
-  - skopeo
-  - uidmap
-  - slirp4netns
-  - fuse-overlayfs
-  - catatonit
-  # -- media / creative --
-  - ffmpeg
-  - imagemagick
-  - poppler-utils
-  - tesseract-ocr
-  - pandoc
-  # -- audio / TTS support --
-  - espeak-ng
-  - mpg123
-  - sox
-  - libsox-fmt-all
-  - alsa-utils
-  # -- security: automatic updates --
-  - unattended-upgrades
-  # -- dev quality / data --
-  - shellcheck
-  - shfmt
-  - sqlite3
-  - gh
-  - htop
-  - graphviz
 
-runcmd:
-  # Enable unattended-upgrades (automatic security updates).
-  - dpkg-reconfigure -f noninteractive unattended-upgrades
-  - systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
-  # Canonical binary-name aliases (Ubuntu renames these to avoid conflicts;
-  # an agent will call them by their upstream names).
-  - ln -sf "$(which fdfind)" /usr/local/bin/fd
-  - ln -sf "$(which batcat)" /usr/local/bin/bat
-  # Rootless-podman subuid/subgid ranges for the hermes user.
-  - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 hermes
-  # uv -- fast Python package/venv manager.
-  - curl -LsSf https://astral.sh/uv/install.sh | sh
-  # rustup + stable toolchain (current Rust; apt's is stale).
-  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  # yq (mikefarah Go binary -- NOT the apt Python yq wrapper).
-  - |
-    YQ_VER=$(curl -sL https://api.github.com/repos/mikefarah/yq/releases/latest | grep tag_name | cut -d '"' -f4)
-    wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${{YQ_VER}}/yq_linux_amd64"
-    chmod +x /usr/local/bin/yq
-  # edge-tts -- open-source Microsoft Edge TTS (no API key required).
-  - python3 -m pip install --break-system-packages edge-tts
-"""
+_YQ_INSTALL_CMD = (
+    'YQ_VER=$(curl -sL https://api.github.com/repos/mikefarah/yq/releases/latest | grep tag_name | cut -d \'"\' -f4)\n'
+    'wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VER}/yq_linux_amd64"\n'
+    "chmod +x /usr/local/bin/yq"
+)
+
+
+def _base_runcmd() -> list[str]:
+    """Return the base runcmd list executed on every sandbox VM first boot."""
+    return [
+        "systemctl restart ssh",
+        # Enable unattended-upgrades (automatic security updates).
+        "dpkg-reconfigure -f noninteractive unattended-upgrades",
+        "systemctl enable --now apt-daily.timer apt-daily-upgrade.timer",
+        'ln -sf "$(which fdfind)" /usr/local/bin/fd',
+        'ln -sf "$(which batcat)" /usr/local/bin/bat',
+        "usermod --add-subuids 100000-165535 --add-subgids 100000-165535 hermes",
+        "curl -LsSf https://astral.sh/uv/install.sh | sh",
+        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
+        _YQ_INSTALL_CMD,
+        "python3 -m pip install --break-system-packages edge-tts",
+    ]
+
+
+def _base_cloud_init_config(public_key: str) -> dict[str, Any]:
+    """Return the base cloud-init config as a Python dict.
+
+    Creates a non-root ``hermes`` user with passwordless sudo and the injected
+    SSH key, hardens SSH to key-only access (no root login, no password auth),
+    and pre-installs a curated toolchain so the sandbox boots ready to work.
+
+    SSH hardening is applied via ``ssh_pwauth: false`` plus a drop-in sshd
+    config in ``write_files``, followed by an early ``systemctl restart ssh``
+    in ``runcmd`` so the hardening is active before any other first-boot
+    activity.
+    """
+    return {
+        "package_update": True,
+        "ssh_pwauth": False,
+        "users": [
+            {
+                "name": "hermes",
+                "sudo": "ALL=(ALL) NOPASSWD:ALL",
+                "shell": "/bin/bash",
+                "ssh_authorized_keys": [public_key],
+            }
+        ],
+        "write_files": [
+            {
+                "path": "/etc/ssh/sshd_config.d/99-sandbox-hardening.conf",
+                "content": (
+                    "PermitRootLogin no\n"
+                    "PasswordAuthentication no\n"
+                    "PubkeyAuthentication yes\n"
+                ),
+                "permissions": "0644",
+                "owner": "root:root",
+            }
+        ],
+        "packages": _base_packages(),
+        "runcmd": _base_runcmd(),
+    }
+
+
+class _CloudInitDumper(yaml.SafeDumper):  # type: ignore[misc]
+    """SafeDumper that forces literal-block style for multi-line runcmd strings."""
+
+
+def _str_representer(dumper: _CloudInitDumper, data: str) -> yaml.Node:
+    """Use literal block scalar (``|``) for strings containing newlines."""
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+_CloudInitDumper.add_representer(str, _str_representer)
+
+
+def _dump_cloud_config(config: dict[str, Any]) -> str:
+    """Serialize a cloud-init config dict to ``#cloud-config`` YAML text."""
+    body = yaml.dump(
+        config,
+        Dumper=_CloudInitDumper,
+        default_flow_style=False,
+        sort_keys=False,
+        width=1000,
+    )
+    return f"#cloud-config\n{body}"
 
 
 def build_cloud_init_user_data(
     public_key: str,
     forward_env: dict[str, str] | None = None,
+    apt_repos: tuple[str, ...] = (),
+    extra_packages: tuple[str, ...] = (),
+    setup_commands: tuple[str, ...] = (),
 ) -> str:
     """Return cloud-init user-data that creates the ``hermes`` user.
 
@@ -153,40 +213,62 @@ def build_cloud_init_user_data(
     field).  The caller is responsible for base64-encoding when the API
     requires it (e.g. Hetzner).
 
-    The template pre-installs a curated toolchain (build essentials, common
+    The config pre-installs a curated toolchain (build essentials, common
     languages, media/TTS tools, modern shell utilities) so the sandbox boots
-    ready to work.  The ``${{...}}`` escaping preserves cloud-init's literal
-    shell variable after Python's ``str.format`` runs.
+    ready to work.
 
-    When *forward_env* is non-empty, a ``write_files`` entry is injected that
-    writes ``/etc/environment`` with ``KEY=VALUE`` lines for each name/value
-    pair.  ``/etc/environment`` is read by PAM (``pam_env``) during every
+    SSH is hardened to key-only access: password authentication is disabled,
+    root login over SSH is blocked, and sshd is restarted early in ``runcmd``
+    so the hardening is active before any other first-boot activity.
+
+    When *forward_env* is non-empty, a ``runcmd`` entry is prepended to the
+    template's existing ``runcmd`` list that appends each forwarded var to
+    ``/etc/environment``.  Appending (rather than ``write_files`` which
+    clobbers) preserves existing system entries like ``PATH`` and ``LANG``.
+    ``/etc/environment`` is read by PAM (``pam_env``) during every
     SSH session, so the forwarded values are injected at the process level
     — no shell sourcing, login shell, or snapshot dependency required.
-    The file is owned by ``root:root`` with ``0644`` permissions (PAM on
-    some distributions skips files that are group/world-writable, and
-    ``/etc/environment`` is conventionally world-readable since it
-    contains no secrets in standard setups).
+
+    *apt_repos* lines are injected as ``apt_sources`` entries (before the
+    ``packages`` list) so the VM can install packages from third-party
+    repositories.  *extra_packages* are appended to the ``packages`` list.
+    *setup_commands* are appended to the ``runcmd`` list after the existing
+    entries.  All three are additive — the existing template content is
+    unchanged.
     """
-    user_data = _CLOUD_INIT_USER_DATA.format(public_key=public_key)
+    config = _base_cloud_init_config(public_key)
+
+    # Rebuild the dict so apt_sources is ordered before packages (cloud-init
+    # processes keys independently, but keeping a natural order is cleaner and
+    # the tests assert on source ordering).
+    apt_sources = (
+        [{"source": repo} for repo in apt_repos] if apt_repos else None
+    )
+
+    ordered: dict[str, Any] = {}
+    ordered["package_update"] = config["package_update"]
+    ordered["ssh_pwauth"] = config["ssh_pwauth"]
+    ordered["users"] = config["users"]
+    ordered["write_files"] = config["write_files"]
+    if apt_sources:
+        ordered["apt_sources"] = apt_sources
+    if extra_packages:
+        ordered["packages"] = [*config["packages"], *extra_packages]
+    else:
+        ordered["packages"] = config["packages"]
+    if setup_commands:
+        ordered["runcmd"] = [*config["runcmd"], *setup_commands]
+    else:
+        ordered["runcmd"] = config["runcmd"]
 
     if forward_env:
-        content_lines = [
-            f"{name}={value}" for name, value in sorted(forward_env.items())
-        ]
-        block = [
-            "",
-            "write_files:",
-            "  - path: /etc/environment",
-            "    content: |",
-        ]
-        for cl in content_lines:
-            block.append(f"      {cl}")
-        block.append("    permissions: '0644'")
-        block.append("    owner: root:root")
-        user_data += "\n".join(block) + "\n"
+        append_cmds = "".join(
+            f"printf '%s=%s\\n' {name!r} {value!r} >> /etc/environment\n"
+            for name, value in sorted(forward_env.items())
+        )
+        ordered["runcmd"] = [append_cmds, *ordered["runcmd"]]
 
-    return user_data
+    return _dump_cloud_config(ordered)
 
 
 class CloudProvider(ABC):
@@ -227,6 +309,9 @@ class CloudProvider(ABC):
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
         forward_env: dict[str, str] | None = None,
+        apt_repos: tuple[str, ...] = (),
+        extra_packages: tuple[str, ...] = (),
+        setup_commands: tuple[str, ...] = (),
     ) -> VMInstance:
         """Create (or reuse) a VM and return its description.
 
@@ -236,6 +321,11 @@ class CloudProvider(ABC):
 
         When *forward_env* is non-empty, the values are injected into the VM
         at provision time so the login shell environment includes them.
+
+        *apt_repos* are injected as cloud-init ``apt_sources`` entries,
+        *extra_packages* are appended to the ``packages`` list, and
+        *setup_commands* are appended to the ``runcmd`` list.  All three
+        are additive to the base template.
         """
 
     @abstractmethod
@@ -270,14 +360,22 @@ def poll_until(
     seconds.  ``sleep`` and ``clock`` are injectable so the poll loop can be
     exercised in tests without real waiting.  The predicate is always called at
     least once before sleeping.
+
+    The sleep duration is reduced by the time the predicate itself took, so
+    slow API calls inside the predicate don't consume the entire timeout
+    budget.  If the predicate took longer than ``interval``, no sleep occurs.
     """
     deadline = clock() + timeout
     while True:
+        pre = clock()
         if predicate():
             return
-        if clock() >= deadline:
+        post = clock()
+        if post >= deadline:
             raise TimeoutError(f"poll_until: condition not met within {timeout}s")
-        sleep(interval)
+        predicate_duration = post - pre
+        remaining_sleep = max(0.0, interval - predicate_duration)
+        sleep(min(remaining_sleep, deadline - post))
 
 
 # --------------------------------------------------------------------------- #

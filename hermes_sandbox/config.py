@@ -37,6 +37,13 @@ class SandboxConfig:
     forward_env: tuple[str, ...] = ()
     # 0 = no TTL reaping (default); >0 = tear down VM when unused for N seconds.
     vm_ttl_seconds: int = 0
+    # Additional apt repository lines injected as cloud-init ``apt_sources``
+    # entries (e.g. ``("deb https://packages.example.com stable main",)``).
+    apt_repos: tuple[str, ...] = ()
+    # Additional apt packages appended to the cloud-init ``packages`` list.
+    extra_packages: tuple[str, ...] = ()
+    # Custom shell commands appended to the cloud-init ``runcmd`` list.
+    setup_commands: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> SandboxConfig:
@@ -70,6 +77,21 @@ class SandboxConfig:
                 if name.strip()
             ),
             vm_ttl_seconds=int(_get("SANDBOX_VM_TTL_SECONDS", "0") or "0"),
+            apt_repos=tuple(
+                line.strip()
+                for line in _get("SANDBOX_APT_REPOS", "").splitlines()
+                if line.strip()
+            ),
+            extra_packages=tuple(
+                name.strip()
+                for name in _get("SANDBOX_PACKAGES", "").split(",")
+                if name.strip()
+            ),
+            setup_commands=tuple(
+                cmd.strip()
+                for cmd in _get("SANDBOX_SETUP_CMDS", "").splitlines()
+                if cmd.strip()
+            ),
         )
 
     def is_configured(self) -> bool:

@@ -50,6 +50,9 @@ class DryRunProvider(CloudProvider):
         ssh_public_key: str,
         labels: dict[str, str] | None = None,
         forward_env: dict[str, str] | None = None,
+        apt_repos: tuple[str, ...] = (),
+        extra_packages: tuple[str, ...] = (),
+        setup_commands: tuple[str, ...] = (),
     ) -> VMInstance:
         vm_id = str(uuid.uuid4())
         vm = VMInstance(
@@ -63,6 +66,9 @@ class DryRunProvider(CloudProvider):
                 "labels": labels or {},
                 "instance_type": instance_type,
                 "forward_env": forward_env or {},
+                "apt_repos": apt_repos,
+                "extra_packages": extra_packages,
+                "setup_commands": setup_commands,
             },
         )
         self._vms[vm_id] = vm
