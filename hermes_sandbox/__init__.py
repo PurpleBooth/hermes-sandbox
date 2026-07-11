@@ -205,17 +205,26 @@ _VM_TOOLS = frozenset(
 
 
 def _on_pre_tool_call(tool_name: str = "", session_id: str = "", **_: Any) -> None:
-    """Touch last_used when a VM-backed tool fires.
+    """Touch last_used and re-apply SSH env vars when a VM-backed tool fires.
 
     Keeps the TTL reaper from tearing down a VM that's actively in use.
     Only fires for tools that route through the ssh backend (terminal,
     file, execute_code) — not for skill_view, memory, etc.
+
+    Also re-applies ``TERMINAL_SSH_*`` env vars from the recorded state so
+    that terminal calls work even when ``on_session_start`` hasn't fired
+    yet (e.g. TUI gateway PTY sessions where the config bridge sets
+    ``TERMINAL_ENV=ssh`` but the SSH host/user aren't in config.yaml).
     """
     if tool_name not in _VM_TOOLS:
         return
     manager = _manager_or_build()
     if manager is None:
         return
+    try:
+        _apply_ssh_env(manager)
+    except Exception as exc:
+        logger.debug("sandbox: re-apply ssh env on tool %s failed: %s", tool_name, exc)
     try:
         manager.touch()
     except Exception as exc:
