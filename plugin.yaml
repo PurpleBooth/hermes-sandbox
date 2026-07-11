@@ -1,0 +1,9 @@
+name: sandbox
+version: 0.1.0
+description: "Provisions an ephemeral cloud VM on session start and routes Hermes' terminal tools into it, giving the agent an isolated, root-level machine that is torn down when the session ends."
+author: billie
+hooks:
+  - on_session_start
+  - on_session_end
+provides_tools: []
+requires_env: []
