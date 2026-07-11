@@ -1051,8 +1051,13 @@ def test_ensure_vm_proceeds_when_ssh_not_ready_after_provisioning(tmp_path, fake
 
 
 def test_eager_wire_ssh_env_skips_when_ssh_unreachable(tmp_path, fake_key_factory, monkeypatch):
-    """_eager_wire_ssh_env must set TERMINAL_ENV=ssh even when SSH is
-    unreachable, but must NOT set TERMINAL_SSH_HOST (defers to on_session_start)."""
+    """_eager_wire_ssh_env must set TERMINAL_ENV=ssh and TERMINAL_SSH_HOST
+    from recorded state even when SSH is unreachable.
+
+    The agent constructor probes the terminal backend before on_session_start
+    fires, so the SSH env vars must be present regardless of VM liveness.
+    on_session_start will reprovision if the VM is dead.
+    """
     import os
 
     provider = DryRunProvider()
@@ -1082,6 +1087,7 @@ def test_eager_wire_ssh_env_skips_when_ssh_unreachable(tmp_path, fake_key_factor
     assert os.environ.get("TERMINAL_ENV") == "ssh", (
         "TERMINAL_ENV must be ssh even when SSH probe fails"
     )
-    assert not os.environ.get("TERMINAL_SSH_HOST"), (
-        "TERMINAL_SSH_HOST must not be set when SSH probe fails"
+    assert os.environ.get("TERMINAL_SSH_HOST"), (
+        "TERMINAL_SSH_HOST must be set from recorded state even when SSH "
+        "probe fails — the agent probe needs it before on_session_start fires"
     )
