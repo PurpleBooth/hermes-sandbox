@@ -10,7 +10,7 @@ from hermes_sandbox.dry_run import DryRunProvider
 from hermes_sandbox.lifecycle import VMLifecycleManager
 
 
-def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None, clock=None):
+def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None, clock=None, ssh_probe=None):
     provider = provider or DryRunProvider()
     config = config or SandboxConfig(provider_name="dry-run", token="", ssh_user="root")
     hermes_home = tmp_path / ".hermes"
@@ -21,6 +21,7 @@ def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None, cl
         hermes_home=hermes_home,
         key_factory=fake_key_factory,
         clock=clock or time.time,
+        ssh_probe=ssh_probe or (lambda **kwargs: True),
     )
 
 
@@ -184,8 +185,8 @@ def test_state_records_ipv6_and_ssh_host(tmp_path, fake_key_factory):
     assert state["public_ipv6"] == "2a01:db8::1", (
         f"state must record the VM's IPv6, got {state['public_ipv6']!r}"
     )
-    assert state["ssh_host"] == "2a01:db8::1", (
-        f"ssh_host must prefer IPv6, got {state['ssh_host']!r}"
+    assert state["ssh_host"] == state["public_ip"], (
+        f"ssh_host must prefer IPv4, got {state['ssh_host']!r}"
     )
 
 
@@ -283,6 +284,7 @@ def test_manager_accepts_injected_state_repo(tmp_path, fake_key_factory):
         hermes_home=tmp_path / ".hermes",
         key_factory=fake_key_factory,
         state_repo=InMemoryRepo(),
+        ssh_probe=lambda **kwargs: True,
     )
     vm = mgr.ensure_vm()
     assert vm.is_running(), f"provisioned VM must be running, status={vm.status!r}"
@@ -961,4 +963,125 @@ def test_ensure_vm_passes_setup_commands_to_provider(tmp_path, fake_key_factory)
     vm = mgr.ensure_vm()
     assert vm.extra.get("setup_commands") == ("echo hello",), (
         f"setup_commands must be passed through to the provider, got {vm.extra.get('setup_commands')!r}"
+    )
+
+
+# ── SSH readiness probing ──────────────────────────────────────────────────
+
+
+def test_ensure_vm_probes_ssh_after_provisioning(tmp_path, fake_key_factory):
+    """ensure_vm() must call the SSH probe after provisioning a new VM."""
+    probe_calls: list[dict] = []
+
+    def recording_probe(**kwargs):
+        probe_calls.append(kwargs)
+        return True
+
+    mgr = make_manager(
+        tmp_path,
+        fake_key_factory=fake_key_factory,
+        ssh_probe=recording_probe,
+    )
+    mgr.ensure_vm()
+    assert len(probe_calls) == 1, (
+        f"SSH probe must fire exactly once after provisioning, got {len(probe_calls)}"
+    )
+    assert probe_calls[0]["timeout"] == 120, (
+        f"provision-timeout must be 120s, got {probe_calls[0]['timeout']}"
+    )
+
+
+def test_ensure_vm_probes_ssh_on_reuse(tmp_path, fake_key_factory):
+    """ensure_vm() must probe SSH before reusing an existing VM."""
+    probe_calls: list[dict] = []
+
+    def recording_probe(**kwargs):
+        probe_calls.append(kwargs)
+        return True
+
+    provider = DryRunProvider()
+    mgr = make_manager(
+        tmp_path,
+        provider=provider,
+        fake_key_factory=fake_key_factory,
+        ssh_probe=recording_probe,
+    )
+    mgr.ensure_vm()
+    probe_calls.clear()
+    mgr.ensure_vm()
+    assert len(probe_calls) == 1, (
+        f"SSH probe must fire once on reuse, got {len(probe_calls)}"
+    )
+    assert probe_calls[0]["timeout"] == 30, (
+        f"reuse-timeout must be 30s, got {probe_calls[0]['timeout']}"
+    )
+
+
+def test_ensure_vm_reprovisions_when_ssh_unreachable_on_reuse(tmp_path, fake_key_factory):
+    """If SSH is unreachable on a recorded VM, ensure_vm must reprovision."""
+    provider = DryRunProvider()
+    mgr = make_manager(
+        tmp_path,
+        provider=provider,
+        fake_key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: False,
+    )
+    first = mgr.ensure_vm()
+    second = mgr.ensure_vm()
+    assert second.id != first.id, (
+        f"SSH-unreachable VM must be replaced, both were {first.id!r}"
+    )
+    provisions = [c for c in provider.calls if c["op"] == "provision"]
+    assert len(provisions) == 2, (
+        f"reprovisioning must provision twice, got {len(provisions)}"
+    )
+
+
+def test_ensure_vm_proceeds_when_ssh_not_ready_after_provisioning(tmp_path, fake_key_factory):
+    """If SSH never becomes ready after provisioning, ensure_vm must still
+    record state and return the VM (fail-open — the agent will retry)."""
+    mgr = make_manager(
+        tmp_path,
+        fake_key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: False,
+    )
+    vm = mgr.ensure_vm()
+    assert vm.is_running(), "VM must be returned even when SSH probe fails"
+    assert mgr.state_path.exists(), "state must be recorded even when SSH probe fails"
+
+
+def test_eager_wire_ssh_env_skips_when_ssh_unreachable(tmp_path, fake_key_factory, monkeypatch):
+    """_eager_wire_ssh_env must set TERMINAL_ENV=ssh even when SSH is
+    unreachable, but must NOT set TERMINAL_SSH_HOST (defers to on_session_start)."""
+    import os
+
+    provider = DryRunProvider()
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir(exist_ok=True)
+    mgr = VMLifecycleManager(
+        provider=provider,
+        config=SandboxConfig(provider_name="dry-run", token="", ssh_user="root"),
+        hermes_home=hermes_home,
+        key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: False,
+    )
+    mgr.ensure_vm()
+    monkeypatch.delenv("TERMINAL_ENV", raising=False)
+    monkeypatch.delenv("TERMINAL_SSH_HOST", raising=False)
+
+    import hermes_sandbox
+    from hermes_sandbox import _eager_wire_ssh_env
+
+    orig_manager = hermes_sandbox._manager
+    hermes_sandbox._manager = mgr
+    try:
+        _eager_wire_ssh_env()
+    finally:
+        hermes_sandbox._manager = orig_manager
+
+    assert os.environ.get("TERMINAL_ENV") == "ssh", (
+        "TERMINAL_ENV must be ssh even when SSH probe fails"
+    )
+    assert not os.environ.get("TERMINAL_SSH_HOST"), (
+        "TERMINAL_SSH_HOST must not be set when SSH probe fails"
     )

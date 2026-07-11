@@ -324,8 +324,8 @@ def test_provision_returns_running_vm_with_all_fields(name: str, contract_image)
 
 
 @pytest.mark.parametrize("name", _provision_providers)
-def test_provisioned_vm_prefers_ipv6_when_available(name: str, contract_image):
-    """If the provider returns an IPv6 address, preferred_ip() must use it."""
+def test_provisioned_vm_prefers_ipv4_when_available(name: str, contract_image):
+    """If the provider returns an IPv4 address, preferred_ip() must use it."""
     p = _make_provider(name)
     vm = p.provision(
         name="contract-test-vm",
@@ -335,10 +335,9 @@ def test_provisioned_vm_prefers_ipv6_when_available(name: str, contract_image):
         ssh_public_key="ssh-ed25519 K",
         labels={"hermes-sandbox": "true"},
     )
-    # hetzner and digitalocean fakes both return IPv6; dry-run/qemu do not.
-    if vm.public_ipv6:
-        assert vm.preferred_ip() == vm.public_ipv6, (
-            f"{name}: preferred_ip must use IPv6 when available, got {vm.preferred_ip()!r}"
+    if vm.public_ip:
+        assert vm.preferred_ip() == vm.public_ip, (
+            f"{name}: preferred_ip must use IPv4 when available, got {vm.preferred_ip()!r}"
         )
 
 
@@ -520,6 +519,7 @@ def test_shared_mode_reuses_vm_across_sessions(name: str, make_image, tmp_path, 
         config=config,
         hermes_home=tmp_path / ".hermes",
         key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: True,
     )
 
     first = mgr.ensure_vm()
@@ -550,6 +550,7 @@ def test_shared_mode_provisions_only_once(name: str, make_image, tmp_path, fake_
         config=config,
         hermes_home=tmp_path / ".hermes",
         key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: True,
     )
 
     mgr.ensure_vm()

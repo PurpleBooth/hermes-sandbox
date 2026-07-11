@@ -485,12 +485,33 @@ def _eager_wire_ssh_env() -> None:
     previous session, wire the env vars now so the probe succeeds instead
     of failing with "SSH backend selected but TERMINAL_SSH_HOST not set".
 
-    No cloud API calls — reads only the local state file.  If there is no
-    state file yet (first-ever boot), this is a no-op and ``on_session_start``
-    handles provisioning on the first turn.
+    Always sets ``TERMINAL_ENV=ssh`` when there's recorded state, so the
+    agent uses the SSH backend even if the probe fails — the probe failure
+    just means ``on_session_start`` will reprovision.  Without this, the
+    agent falls back to ``local`` and runs commands on the pod itself.
     """
     manager = _manager_or_build()
     if manager is None:
+        return
+    state = manager._repo.load()
+    if not state or not state.vm_id:
+        return
+    # Always select the ssh backend — even if the VM is dead, we don't
+    # want the agent running commands on the pod. on_session_start will
+    # provision a new VM and update the SSH host details.
+    os.environ["TERMINAL_ENV"] = "ssh"
+    try:
+        vm = manager.provider.get(state.vm_id)
+    except Exception:
+        return
+    if not vm.is_running() or not vm.preferred_ip():
+        return
+    if not manager._probe_ssh(vm, timeout=10):
+        logger.warning(
+            "sandbox: recorded VM %s not SSH-reachable at startup — "
+            "on_session_start will reprovision",
+            vm.id,
+        )
         return
     _apply_ssh_env(manager)
     logger.debug("sandbox: eagerly wired SSH env from existing state")
