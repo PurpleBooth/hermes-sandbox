@@ -29,6 +29,12 @@ class DryRunProvider(CloudProvider):
 
     name = "dry-run"
 
+    #: The dry-run provider hands out a fake ``10.x.x.x`` IP that no real SSH
+    #: daemon answers.  Skip the readiness probe so provision/recreate calls
+    #: return immediately instead of blocking for the full SSH timeout (which
+    #: would otherwise exhaust the CI runner time budget across specdown).
+    skip_ssh_probe = True
+
     def __init__(self, token: str = "", provision_delay: float = 0.0) -> None:
         # ``token`` is accepted (and ignored) so ``get_provider(name, token=…)``
         # works uniformly across real and dry-run providers.
