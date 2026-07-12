@@ -86,8 +86,8 @@ jobs:
       # needs no KVM / privileged runner.
       - name: Install QEMU + xorriso
         run: |
-          apt-get update
-          apt-get install -y qemu-system-x86 xorriso
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 xorriso
 
       # Cloud tokens are forwarded to the test harness so the Hetzner and
       # DigitalOcean task specs can provision real VMs.  When a token secret
