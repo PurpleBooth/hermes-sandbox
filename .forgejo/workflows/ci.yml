@@ -55,6 +55,7 @@ jobs:
   specdown:
     name: End-to-end (specdown)
     runs-on: codeberg-small
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
