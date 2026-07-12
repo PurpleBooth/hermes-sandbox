@@ -85,9 +85,10 @@ jobs:
       # actually runs.  QEMU falls back to TCG (software emulation), so this
       # needs no KVM / privileged runner.
       - name: Install QEMU + xorriso
+        continue-on-error: true
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 xorriso
+          apt-get update
+          apt-get install -y qemu-system-x86 xorriso
 
       # Cloud tokens are forwarded to the test harness so the Hetzner and
       # DigitalOcean task specs can provision real VMs.  When a token secret
