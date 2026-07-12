@@ -977,8 +977,14 @@ def test_ensure_vm_probes_ssh_after_provisioning(tmp_path, fake_key_factory):
         probe_calls.append(kwargs)
         return True
 
+    # The default DryRunProvider skips the SSH probe (skip_ssh_probe=True),
+    # but this test specifically checks the probe fires.  Disable the skip
+    # so the probe behaviour is exercised.
+    provider = DryRunProvider()
+    provider.skip_ssh_probe = False
     mgr = make_manager(
         tmp_path,
+        provider=provider,
         fake_key_factory=fake_key_factory,
         ssh_probe=recording_probe,
     )
@@ -1000,6 +1006,7 @@ def test_ensure_vm_probes_ssh_on_reuse(tmp_path, fake_key_factory):
         return True
 
     provider = DryRunProvider()
+    provider.skip_ssh_probe = False
     mgr = make_manager(
         tmp_path,
         provider=provider,
@@ -1017,9 +1024,39 @@ def test_ensure_vm_probes_ssh_on_reuse(tmp_path, fake_key_factory):
     )
 
 
+def test_dry_run_provider_skips_ssh_probe(tmp_path, fake_key_factory):
+    """DryRunProvider has skip_ssh_probe=True so _probe_ssh must never call the
+    injected ssh_probe.  This is what keeps the specdown CI job from timing
+    out: the dry-run IP is unreachable, so without the flag every ensure_vm()
+    would block for the full SSH timeout.
+    """
+    probe_calls: list[dict] = []
+
+    def recording_probe(**kwargs):
+        probe_calls.append(kwargs)
+        return True
+
+    provider = DryRunProvider()
+    assert provider.skip_ssh_probe is True, (
+        "DryRunProvider.skip_ssh_probe must be True"
+    )
+    mgr = make_manager(
+        tmp_path,
+        provider=provider,
+        fake_key_factory=fake_key_factory,
+        ssh_probe=recording_probe,
+    )
+    mgr.ensure_vm()          # provision path
+    mgr.ensure_vm()          # reuse path
+    assert probe_calls == [], (
+        f"ssh_probe must not fire when skip_ssh_probe is set, got {probe_calls}"
+    )
+
+
 def test_ensure_vm_reprovisions_when_ssh_unreachable_on_reuse(tmp_path, fake_key_factory):
     """If SSH is unreachable on a recorded VM, ensure_vm must reprovision."""
     provider = DryRunProvider()
+    provider.skip_ssh_probe = False
     mgr = make_manager(
         tmp_path,
         provider=provider,
