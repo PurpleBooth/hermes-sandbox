@@ -177,7 +177,19 @@ class VMLifecycleManager:
         Uses the injectable ``_ssh_probe`` (defaults to :func:`wait_for_ssh`)
         so tests can substitute a no-op.  Returns True on success, False on
         timeout — callers log and proceed (fail-open) rather than crashing.
+
+        Providers whose :attr:`~CloudProvider.skip_ssh_probe` flag is set
+        (e.g. :class:`~hermes_sandbox.dry_run.DryRunProvider`) return a fake
+        IP no SSH daemon answers; for those we skip the probe entirely and
+        return ``True`` immediately so provision/recreate does not block for
+        the full timeout on every call.
         """
+        if getattr(self.provider, "skip_ssh_probe", False):
+            logger.debug(
+                "sandbox: skipping SSH readiness probe for %s (skip_ssh_probe set)",
+                self.provider.name,
+            )
+            return True
         host = vm.preferred_ip()
         if not host:
             logger.warning("sandbox: cannot probe SSH — VM %s has no IP", vm.id)

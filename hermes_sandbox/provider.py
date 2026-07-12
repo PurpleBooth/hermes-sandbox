@@ -290,6 +290,14 @@ class CloudProvider(ABC):
     default_instance_type: str = "cx23"
     default_ssh_user: str = "hermes"
 
+    #: When True, the lifecycle manager skips the SSH readiness probe for VMs
+    #: from this provider.  Real clouds need the probe (a VM may be "running"
+    #: per the API but not yet accepting SSH), but in-memory / dry-run
+    #: providers return a fake IP that can never be reached -- probing it
+    #: blocks for the full timeout on every call, which exhausts the CI
+    #: runner time budget.  Dry-run and other simulated providers set this.
+    skip_ssh_probe: bool = False
+
     @classmethod
     def resolve_token(cls, env: dict[str, str]) -> str:
         """Return the first non-empty token from :attr:`token_env_keys`."""
