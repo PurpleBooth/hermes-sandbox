@@ -22,6 +22,7 @@ import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from importlib import resources
 from typing import Any
 
 import yaml
@@ -133,6 +134,15 @@ def _base_runcmd() -> list[str]:
     ]
 
 
+def _agents_md_content() -> str:
+    """Return the AGENTS.md text shipped as a package resource.
+
+    The file is seeded into every sandbox VM's home directory so the agent
+    boots with context about its environment.
+    """
+    return resources.files(__name__).joinpath("AGENTS.md").read_text("utf-8")
+
+
 def _base_cloud_init_config(public_key: str) -> dict[str, Any]:
     """Return the base cloud-init config as a Python dict.
 
@@ -166,7 +176,13 @@ def _base_cloud_init_config(public_key: str) -> dict[str, Any]:
                 ),
                 "permissions": "0644",
                 "owner": "root:root",
-            }
+            },
+            {
+                "path": "/home/hermes/AGENTS.md",
+                "content": _agents_md_content(),
+                "permissions": "0644",
+                "owner": "hermes:hermes",
+            },
         ],
         "packages": _base_packages(),
         "runcmd": _base_runcmd(),
