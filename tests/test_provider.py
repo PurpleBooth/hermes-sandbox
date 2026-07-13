@@ -264,6 +264,30 @@ def test_build_cloud_init_hermes_user_has_sudo():
     )
 
 
+# ── AGENTS.md seeding ─────────────────────────────────────────────────────
+
+
+def test_build_cloud_init_seeds_agents_md_in_home():
+    """AGENTS.md must be written to /home/hermes/AGENTS.md via write_files."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    agents_files = [f for f in config["write_files"] if f["path"] == "/home/hermes/AGENTS.md"]
+    assert len(agents_files) == 1, (
+        "there must be exactly one write_files entry for /home/hermes/AGENTS.md"
+    )
+    entry = agents_files[0]
+    assert entry["content"].startswith("# Hermes Sandbox"), (
+        "AGENTS.md content must start with the '# Hermes Sandbox' title"
+    )
+    assert entry["owner"] == "hermes:hermes", (
+        f"AGENTS.md owner must be hermes:hermes, got {entry.get('owner')!r}"
+    )
+    assert entry["permissions"] == "0644", (
+        f"AGENTS.md permissions must be 0644, got {entry.get('permissions')!r}"
+    )
+
+
 # ── forward_env → cloud-init write_files ───────────────────────────────────
 
 
@@ -271,8 +295,9 @@ def test_build_cloud_init_without_forward_env_has_no_etc_environment_append(tmp_
     """Without forward_env the user-data must NOT append to /etc/environment."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    data = build_cloud_init_user_data("ssh-ed25519 AAAA")
-    assert "/etc/environment" not in data, (
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    runcmd_str = " ".join(config["runcmd"])
+    assert "/etc/environment" not in runcmd_str, (
         "no /etc/environment append when forward_env is empty"
     )
 
@@ -304,16 +329,22 @@ def test_build_cloud_init_forward_env_empty_dict_no_etc_environment():
     """An empty forward_env dict must NOT inject an /etc/environment entry."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env={})
-    assert "/etc/environment" not in data, "empty forward_env dict must not touch /etc/environment"
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env={}))
+    runcmd_str = " ".join(config["runcmd"])
+    assert "/etc/environment" not in runcmd_str, (
+        "empty forward_env dict must not touch /etc/environment"
+    )
 
 
 def test_build_cloud_init_forward_env_none_no_etc_environment():
     """A None forward_env must NOT inject an /etc/environment entry."""
     from hermes_sandbox.provider import build_cloud_init_user_data
 
-    data = build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None)
-    assert "/etc/environment" not in data, "None forward_env must not touch /etc/environment"
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None))
+    runcmd_str = " ".join(config["runcmd"])
+    assert "/etc/environment" not in runcmd_str, (
+        "None forward_env must not touch /etc/environment"
+    )
 
 
 def test_build_cloud_init_forward_env_prepends_to_runcmd():
