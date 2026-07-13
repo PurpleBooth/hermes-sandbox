@@ -58,12 +58,11 @@ if [ $# -gt 0 ]; then
 fi
 
 # Forward HERMES_HOME and any cloud tokens to every script block.
-# Unset SANDBOX_PROVIDER so specs that test the "not configured" state
-# don't pick up a stale value from the caller's environment — specs that
-# need it set it inline (e.g. SANDBOX_PROVIDER=dry-run hermes sandbox ...).
+# The --temporary-workspace-dir and --unset-env SANDBOX_PROVIDER flags are
+# now declared in specdown.toml (loaded automatically when specdown runs
+# from the repo root).  Only the dynamic env vars stay here.
 ENV_ARGS=(
 	--env "HERMES_HOME=$TEMPORARY_HOME"
-	--unset-env SANDBOX_PROVIDER
 )
 
 # Forward cloud tokens if present in the caller's environment.
@@ -75,7 +74,6 @@ for var in HCLOUD_TOKEN DIGITALOCEAN_TOKEN DO_API_TOKEN; do
 done
 
 exec specdown run \
-	--temporary-workspace-dir \
 	"${ENV_ARGS[@]}" \
 	"${SPECS[@]}"
 
