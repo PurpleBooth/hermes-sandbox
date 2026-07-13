@@ -48,7 +48,7 @@ packages = ["hermes_sandbox"]
 # Include the plugin.yaml manifest so Hermes' PluginManager can discover the
 # plugin when installed via pip (not just from a symlinked source checkout).
 [tool.setuptools.package-data]
-hermes_sandbox = ["plugin.yaml"]
+hermes_sandbox = ["plugin.yaml", "AGENTS.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
