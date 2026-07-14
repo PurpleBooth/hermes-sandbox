@@ -54,8 +54,8 @@ jobs:
 
   specdown:
     name: End-to-end (specdown)
-    runs-on: codeberg-small
-    timeout-minutes: 15
+    runs-on: codeberg-medium
+    timeout-minutes: 10
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v4
 
