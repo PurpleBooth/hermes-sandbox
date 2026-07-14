@@ -66,12 +66,7 @@ jobs:
 
       # Specdown ships prebuilt static binaries — no Rust toolchain needed.
       - name: Install specdown
-        run: |
-          install -d ~/.local/bin
-          curl -L https://github.com/specdown/specdown/releases/latest/download/specdown-x86_64-unknown-linux-gnu \
-            -o ~/.local/bin/specdown
-          chmod +x ~/.local/bin/specdown
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uses: https://github.com/specdown/setup-specdown-action@v0.2.32
 
       # The specdown specs exercise the real `hermes sandbox` CLI, so Hermes
       # itself must be installed on the runner.
