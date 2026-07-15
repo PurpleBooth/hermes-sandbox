@@ -298,6 +298,9 @@ def test_register_wires_hooks_and_commands(tmp_path, fake_key_factory):
         ):
             registered["cli"].append(name)
 
+        def register_tool(self, name, toolset, schema, handler):
+            registered.setdefault("tools", []).append(name)
+
     hermes_sandbox.register(FakeCtx())
     assert "on_session_start" in registered["hooks"], (
         f"register must wire on_session_start, got hooks={registered['hooks']!r}"
@@ -310,6 +313,15 @@ def test_register_wires_hooks_and_commands(tmp_path, fake_key_factory):
     )
     assert "sandbox" in registered["cli"], (
         f"register must wire the sandbox CLI command, got cli={registered['cli']!r}"
+    )
+    assert "sandbox_status" in registered.get("tools", []), (
+        f"register must wire sandbox_status tool, got tools={registered.get('tools', [])!r}"
+    )
+    assert "sandbox_provision" in registered.get("tools", []), (
+        "register must wire sandbox_provision tool"
+    )
+    assert "sandbox_teardown" in registered.get("tools", []), (
+        "register must wire sandbox_teardown tool"
     )
 
 
@@ -550,6 +562,9 @@ def test_register_eagerly_sets_ssh_env_from_existing_state(tmp_path, fake_key_fa
         ):
             pass
 
+        def register_tool(self, name, toolset, schema, handler):
+            pass
+
     hermes_sandbox.register(FakeCtx())
 
     assert os.environ.get("TERMINAL_ENV") == "ssh", (
@@ -591,6 +606,9 @@ def test_register_does_not_set_ssh_env_when_no_state(tmp_path, monkeypatch):
         def register_cli_command(
             self, name, help="", setup_fn=None, handler_fn=None, description=""
         ):
+            pass
+
+        def register_tool(self, name, toolset, schema, handler):
             pass
 
     hermes_sandbox.register(FakeCtx())
@@ -646,6 +664,9 @@ def test_register_eagerly_sets_ssh_env_even_when_vm_is_dead(
         ):
             pass
 
+        def register_tool(self, name, toolset, schema, handler):
+            pass
+
     hermes_sandbox.register(FakeCtx())
 
     assert os.environ.get("TERMINAL_ENV") == "ssh", (
@@ -699,6 +720,9 @@ def test_register_eagerly_sets_ssh_env_when_provider_api_fails(
         def register_cli_command(
             self, name, help="", setup_fn=None, handler_fn=None, description=""
         ):
+            pass
+
+        def register_tool(self, name, toolset, schema, handler):
             pass
 
     hermes_sandbox.register(FakeCtx())
