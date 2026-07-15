@@ -485,6 +485,179 @@ def _start_reaper_thread() -> None:
 
 
 # --------------------------------------------------------------------------- #
+
+
+# ---------------------------------------------------------------------------#
+# Agent-callable tools (ctx.register_tool)
+# ---------------------------------------------------------------------------#
+
+import json as _json
+
+_SANDBOX_STATUS_SCHEMA = {
+    "name": "sandbox_status",
+    "description": (
+        "Check the status of the SSH sandbox VM. Returns the VM ID, IP, "
+        "provider, and liveness state. Use this to diagnose terminal/SSH "
+        "failures before attempting teardown or provision."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+_SANDBOX_PROVISION_SCHEMA = {
+    "name": "sandbox_provision",
+    "description": (
+        "Provision or reuse the sandbox VM. Use this after sandbox_teardown "
+        "to bring up a fresh VM, or when sandbox_status reports no VM. "
+        "Returns the new VM ID and IP."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+_SANDBOX_TEARDOWN_SCHEMA = {
+    "name": "sandbox_teardown",
+    "description": (
+        "Destroy the current sandbox VM. Use this when the SSH sandbox is "
+        "unresponsive or hanging — call sandbox_provision afterwards to "
+        "bring up a fresh VM."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+_SANDBOX_RECREATE_SCHEMA = {
+    "name": "sandbox_recreate",
+    "description": (
+        "Destroy the current sandbox VM and provision a fresh one in one "
+        "step. Use this when the sandbox is unresponsive and you want a "
+        "clean restart without separate teardown + provision calls."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+_SANDBOX_LIST_SCHEMA = {
+    "name": "sandbox_list",
+    "description": (
+        "List all sandbox VMs on the cloud provider. Use this to check "
+        "for stray VMs that may be incurring costs."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+_SANDBOX_CLEANUP_SCHEMA = {
+    "name": "sandbox_cleanup",
+    "description": (
+        "Tear down stray sandbox VMs not tracked by any session. Use this "
+        "to clean up orphaned VMs left from crashed sessions."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+
+def _sandbox_status_handler(args: dict, **kwargs) -> str:
+    """Handler for sandbox_status tool."""
+    manager = _manager_or_build()
+    if manager is None:
+        return _json.dumps({"error": "Sandbox not configured. Set SANDBOX_PROVIDER and a cloud token."})
+    st = manager.status()
+    if not st:
+        return _json.dumps({"status": "no_vm", "message": "No sandbox VM recorded."})
+    return _json.dumps({"status": "ok", "vm": st.to_dict()}, default=str)
+
+
+def _sandbox_provision_handler(args: dict, **kwargs) -> str:
+    """Handler for sandbox_provision tool."""
+    manager = _manager_or_build()
+    if manager is None:
+        return _json.dumps({"error": "Sandbox not configured."})
+    try:
+        vm = manager.ensure_vm()
+        _apply_ssh_env(manager)
+        _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
+        return _json.dumps({"status": "ok", "vm_id": vm.id, "ip": vm.preferred_ip(), "provider": vm.provider})
+    except Exception as exc:
+        return _json.dumps({"error": f"Provisioning failed: {exc}"})
+
+
+def _sandbox_teardown_handler(args: dict, **kwargs) -> str:
+    """Handler for sandbox_teardown tool."""
+    manager = _manager_or_build()
+    if manager is None:
+        return _json.dumps({"error": "Sandbox not configured."})
+    try:
+        ok = manager.teardown()
+        _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
+        return _json.dumps({"status": "ok" if ok else "no_vm", "message": "VM torn down." if ok else "No VM to tear down."})
+    except Exception as exc:
+        return _json.dumps({"error": f"Teardown failed: {exc}"})
+
+
+def _sandbox_recreate_handler(args: dict, **kwargs) -> str:
+    """Handler for sandbox_recreate tool."""
+    manager = _manager_or_build()
+    if manager is None:
+        return _json.dumps({"error": "Sandbox not configured."})
+    try:
+        vm = manager.recreate()
+        _apply_ssh_env(manager)
+        _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
+        return _json.dumps({"status": "ok", "vm_id": vm.id, "ip": vm.preferred_ip(), "provider": vm.provider})
+    except Exception as exc:
+        return _json.dumps({"error": f"Recreate failed: {exc}"})
+
+
+def _sandbox_list_handler(args: dict, **kwargs) -> str:
+    """Handler for sandbox_list tool."""
+    manager = _manager_or_build()
+    if manager is None:
+        return _json.dumps({"error": "Sandbox not configured."})
+    try:
+        vms = manager.list_vms()
+        if not vms:
+            return _json.dumps({"status": "ok", "vms": []})
+        return _json.dumps({
+            "status": "ok",
+            "vms": [
+                {"id": vm.id, "name": vm.name, "provider": vm.provider,
+                 "status": "running" if vm.is_running() else vm.status,
+                 "ip": vm.preferred_ip(), "region": vm.region}
+                for vm in vms
+            ],
+        })
+    except Exception as exc:
+        return _json.dumps({"error": f"List failed: {exc}"})
+
+
+def _sandbox_cleanup_handler(args: dict, **kwargs) -> str:
+    """Handler for sandbox_cleanup tool."""
+    manager = _manager_or_build()
+    if manager is None:
+        return _json.dumps({"error": "Sandbox not configured."})
+    try:
+        known = _collect_known_vm_ids(manager)
+        destroyed = manager.cleanup_strays(known)
+        return _json.dumps({"status": "ok", "destroyed": destroyed if destroyed else []})
+    except Exception as exc:
+        return _json.dumps({"error": f"Cleanup failed: {exc}"})
+
+
+# --------------------------------------------------------------------------- #
 # Plugin registration
 # --------------------------------------------------------------------------- #
 
@@ -543,7 +716,7 @@ def _eager_wire_ssh_env() -> None:
 
 
 def register(ctx: Any) -> None:
-    """Plugin entry point: register session hooks, slash + CLI commands."""
+    """Plugin entry point: register session hooks, slash + CLI commands + tools."""
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
@@ -559,6 +732,43 @@ def register(ctx: Any) -> None:
         setup_fn=_setup_cli,
         handler_fn=_handle_cli,
         description="Provision, inspect, or tear down the cloud-VM sandbox.",
+    )
+    # Register agent-callable tools so the LLM can self-heal the sandbox.
+    ctx.register_tool(
+        name="sandbox_status",
+        toolset="sandbox",
+        schema=_SANDBOX_STATUS_SCHEMA,
+        handler=_sandbox_status_handler,
+    )
+    ctx.register_tool(
+        name="sandbox_provision",
+        toolset="sandbox",
+        schema=_SANDBOX_PROVISION_SCHEMA,
+        handler=_sandbox_provision_handler,
+    )
+    ctx.register_tool(
+        name="sandbox_teardown",
+        toolset="sandbox",
+        schema=_SANDBOX_TEARDOWN_SCHEMA,
+        handler=_sandbox_teardown_handler,
+    )
+    ctx.register_tool(
+        name="sandbox_recreate",
+        toolset="sandbox",
+        schema=_SANDBOX_RECREATE_SCHEMA,
+        handler=_sandbox_recreate_handler,
+    )
+    ctx.register_tool(
+        name="sandbox_list",
+        toolset="sandbox",
+        schema=_SANDBOX_LIST_SCHEMA,
+        handler=_sandbox_list_handler,
+    )
+    ctx.register_tool(
+        name="sandbox_cleanup",
+        toolset="sandbox",
+        schema=_SANDBOX_CLEANUP_SCHEMA,
+        handler=_sandbox_cleanup_handler,
     )
     _eager_wire_ssh_env()
     _start_reaper_thread()
