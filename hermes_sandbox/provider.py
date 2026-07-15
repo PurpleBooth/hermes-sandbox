@@ -140,7 +140,7 @@ def _agents_md_content() -> str:
     The file is seeded into every sandbox VM's home directory so the agent
     boots with context about its environment.
     """
-    return resources.files(__name__).joinpath("AGENTS.md").read_text("utf-8")
+    return resources.files(__package__).joinpath("AGENTS.md").read_text("utf-8")
 
 
 def _base_cloud_init_config(public_key: str) -> dict[str, Any]:
