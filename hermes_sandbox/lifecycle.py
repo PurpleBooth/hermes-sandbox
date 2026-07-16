@@ -297,7 +297,12 @@ class VMLifecycleManager:
                             vm.id,
                             vm.preferred_ip(),
                         )
-                        self._repo.save(state.touched(self._clock()))
+                        # Sync the VM's current IP/port into state — a
+                        # reboot or cloud reassignment can change the
+                        # address since state was last saved.  Without
+                        # this, ssh_env() returns the stale address and
+                        # every SSH connection fails.
+                        self._repo.save(state.synced_from_vm(vm, self._clock()))
                         return vm
                 logger.info(
                     "sandbox: recorded VM %s not running (status=%s) — reprovisioning",

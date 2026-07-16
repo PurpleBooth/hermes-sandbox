@@ -1128,3 +1128,89 @@ def test_eager_wire_ssh_env_skips_when_ssh_unreachable(tmp_path, fake_key_factor
         "TERMINAL_SSH_HOST must be set from recorded state even when SSH "
         "probe fails — the agent probe needs it before on_session_start fires"
     )
+
+
+# ── SSH env sync on VM reuse (IP change bug) ──────────────────────────────
+
+
+def test_ensure_vm_updates_state_ip_on_reuse(tmp_path, fake_key_factory):
+    """ensure_vm() must sync the VM's current IP into state on reuse.
+
+    When a recorded VM's IP changes (e.g. after a reboot or cloud
+    reassignment), the SSH readiness probe succeeds against the VM's
+    *current* IP (from provider.get()), but the saved state still holds
+    the *stale* IP.  ssh_env() reads from state, so the agent's terminal
+    backend dials the wrong address and every SSH connection fails with
+    "Connection refused" or a timeout.
+
+    The fix: on reuse, rebuild the state from the freshly-fetched VM so
+    ssh_host / public_ip / ssh_port reflect the current reality.
+    """
+    import dataclasses
+
+    provider = DryRunProvider()
+    provider.skip_ssh_probe = False
+    mgr = make_manager(
+        tmp_path,
+        provider=provider,
+        fake_key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: True,
+    )
+    first = mgr.ensure_vm()
+    original_ip = first.public_ip
+    assert original_ip, "provisioned VM must have a public IP"
+
+    # Simulate the VM getting a new IP after a reboot/reassignment.
+    new_ip = "192.168.99.77"
+    provider._vms[first.id] = dataclasses.replace(
+        provider._vms[first.id], public_ip=new_ip
+    )
+
+    # ensure_vm reuses the VM (it's still running + SSH-reachable).
+    second = mgr.ensure_vm()
+    assert second.id == first.id, "VM must be reused, not reprovisioned"
+
+    # ssh_env() must reflect the *current* IP, not the stale one.
+    env = mgr.ssh_env()
+    assert env is not None, "ssh_env must return a mapping after reuse"
+    assert env["TERMINAL_SSH_HOST"] == new_ip, (
+        f"ssh_env must use the VM's current IP ({new_ip!r}) on reuse, "
+        f"not the stale one ({original_ip!r})"
+    )
+
+
+def test_ensure_vm_updates_state_port_on_reuse(tmp_path, fake_key_factory):
+    """ensure_vm() must sync a changed SSH port into state on reuse.
+
+    The QEMU provider allocates a random ephemeral port per provision.
+    If the VM is reused but its SSH port changed (e.g. QEMU was
+    restarted with a new host-forward), ssh_env() must emit the current
+    port so the terminal backend connects to the right one.
+    """
+    import dataclasses
+
+    provider = DryRunProvider()
+    provider.skip_ssh_probe = False
+    mgr = make_manager(
+        tmp_path,
+        provider=provider,
+        fake_key_factory=fake_key_factory,
+        ssh_probe=lambda **kwargs: True,
+    )
+    first = mgr.ensure_vm()
+    # Simulate the VM's SSH port changing after a restart.
+    new_port = 9999
+    provider._vms[first.id] = dataclasses.replace(
+        provider._vms[first.id],
+        extra={**first.extra, "ssh_port": new_port},
+    )
+
+    second = mgr.ensure_vm()
+    assert second.id == first.id, "VM must be reused"
+
+    env = mgr.ssh_env()
+    assert env is not None
+    assert env.get("TERMINAL_SSH_PORT") == str(new_port), (
+        f"ssh_env must use the VM's current SSH port ({new_port}) on reuse, "
+        f"got {env.get('TERMINAL_SSH_PORT')!r}"
+    )
