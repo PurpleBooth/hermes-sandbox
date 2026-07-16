@@ -510,11 +510,27 @@ _SANDBOX_PROVISION_SCHEMA = {
     "description": (
         "Provision or reuse the sandbox VM. Use this after sandbox_teardown "
         "to bring up a fresh VM, or when sandbox_status reports no VM. "
-        "Returns the new VM ID and IP."
+        "Returns the new VM ID and IP. Optional configuration overrides "
+        "for instance_type and region are accepted but use defaults if omitted."
     ),
     "parameters": {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "instance_type": {
+                "type": "string",
+                "description": (
+                    "Optional cloud instance type override (e.g. cx22, cx32). "
+                    "Uses the provider default if omitted."
+                ),
+            },
+            "region": {
+                "type": "string",
+                "description": (
+                    "Optional region override (e.g. fsn1, nbg1). "
+                    "Uses the provider default if omitted."
+                ),
+            },
+        },
     },
 }
 
@@ -523,11 +539,20 @@ _SANDBOX_TEARDOWN_SCHEMA = {
     "description": (
         "Destroy the current sandbox VM. Use this when the SSH sandbox is "
         "unresponsive or hanging — call sandbox_provision afterwards to "
-        "bring up a fresh VM."
+        "bring up a fresh VM. Pass vm_id to destroy a specific VM instead "
+        "of the currently recorded one."
     ),
     "parameters": {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "vm_id": {
+                "type": "string",
+                "description": (
+                    "Optional VM ID to destroy. If omitted, destroys the "
+                    "currently recorded sandbox VM."
+                ),
+            },
+        },
     },
 }
 
@@ -560,11 +585,22 @@ _SANDBOX_CLEANUP_SCHEMA = {
     "name": "sandbox_cleanup",
     "description": (
         "Tear down stray sandbox VMs not tracked by any session. Use this "
-        "to clean up orphaned VMs left from crashed sessions."
+        "to clean up orphaned VMs left from crashed sessions. Set confirm "
+        "to true to actually destroy VMs; without it, the tool lists "
+        "what would be destroyed without taking action."
     ),
     "parameters": {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "confirm": {
+                "type": "boolean",
+                "description": (
+                    "Set to true to actually destroy stray VMs. Without "
+                    "confirm=true, the tool returns the list of stray VM "
+                    "IDs that would be destroyed without taking action."
+                ),
+            },
+        },
     },
 }
 
@@ -595,11 +631,20 @@ def _sandbox_provision_handler(args: dict[str, Any], **kwargs: Any) -> str:
 
 
 def _sandbox_teardown_handler(args: dict[str, Any], **kwargs: Any) -> str:
-    """Handler for sandbox_teardown tool."""
+    """Handler for sandbox_teardown tool.
+
+    If ``vm_id`` is provided, destroys that specific VM via the provider
+    directly.  Otherwise, destroys the currently recorded sandbox VM.
+    """
     manager = _manager_or_build()
     if manager is None:
         return json.dumps({"error": "Sandbox not configured."})
     try:
+        vm_id = args.get("vm_id")
+        if vm_id:
+            manager.provider.teardown(vm_id)
+            _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
+            return json.dumps({"status": "ok", "message": f"VM {vm_id} torn down."})
         ok = manager.teardown()
         _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
         return json.dumps({"status": "ok" if ok else "no_vm", "message": "VM torn down." if ok else "No VM to tear down."})
@@ -644,14 +689,27 @@ def _sandbox_list_handler(args: dict[str, Any], **kwargs: Any) -> str:
 
 
 def _sandbox_cleanup_handler(args: dict[str, Any], **kwargs: Any) -> str:
-    """Handler for sandbox_cleanup tool."""
+    """Handler for sandbox_cleanup tool.
+
+    The ``confirm`` parameter controls whether stray VMs are actually
+    destroyed.  Without ``confirm=True``, the tool returns the list of
+    stray VM IDs that *would* be destroyed, so the LLM can preview the
+    impact before committing.
+    """
     manager = _manager_or_build()
     if manager is None:
         return json.dumps({"error": "Sandbox not configured."})
     try:
         known = _collect_known_vm_ids(manager)
+        cloud_vms = manager.list_vms()
+        strays = [vm.id for vm in cloud_vms if vm.id not in known]
+        if not args.get("confirm", False):
+            return json.dumps({"status": "ok", "would_destroy": strays,
+                               "destroyed": [],
+                               "message": "Pass confirm=true to actually destroy these VMs."})
         destroyed = manager.cleanup_strays(known)
-        return json.dumps({"status": "ok", "destroyed": destroyed if destroyed else []})
+        return json.dumps({"status": "ok", "destroyed": destroyed if destroyed else [],
+                           "would_destroy": []})
     except Exception as exc:
         return json.dumps({"error": f"Cleanup failed: {exc}"})
 
