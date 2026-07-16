@@ -65,6 +65,29 @@ class SandboxState:
         """Immutable update: return a copy with ``last_used`` advanced."""
         return replace(self, last_used=now)
 
+    def synced_from_vm(self, vm: VMInstance, now: float) -> SandboxState:
+        """Immutable update: refresh connection fields from a live VM.
+
+        Called on reuse (``ensure_vm`` finds the VM still running) to sync
+        the VM's *current* IP/port/region into the persisted state.  A
+        VM's address can change after a reboot, cloud reassignment, or
+        late IPv6 assignment; ``ssh_env()`` reads from state, so without
+        this sync the terminal backend dials a stale address and every
+        SSH connection fails.
+
+        ``created_at`` is preserved (the VM was not re-provisioned);
+        ``last_used`` is advanced to *now*.
+        """
+        return replace(
+            self,
+            public_ip=vm.public_ip,
+            public_ipv6=vm.public_ipv6,
+            ssh_host=vm.preferred_ip(),
+            region=vm.region,
+            ssh_port=int(vm.extra.get("ssh_port", 22)),
+            last_used=now,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict for JSON persistence."""
         return asdict(self)
