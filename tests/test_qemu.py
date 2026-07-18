@@ -161,6 +161,23 @@ def test_qemu_teardown_missing_is_noop():
     p.teardown("nonexistent")
 
 
+def test_qemu_teardown_rejects_path_traversal_vm_ids(tmp_path):
+    """HIGH-1: vm_id must not be usable for path traversal outside work_dir.
+
+    A vm_id like '../../etc' would otherwise resolve outside the QEMU work
+    directory and silently delete arbitrary host paths via shutil.rmtree.
+    """
+    p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
+    malicious_ids = ["../../", "..\\..\\", "../etc", "..", "a/b", "a\\b"]
+    for bad_id in malicious_ids:
+        with pytest.raises(ValueError, match="Invalid vm_id"):
+            p.teardown(bad_id)
+        # Nothing on disk must have been touched.
+        assert list(tmp_path.iterdir()) == [], (
+            f"teardown({bad_id!r}) must not create or delete any files"
+        )
+
+
 def test_qemu_list_by_label_finds_provisioned_vm(tmp_path):
     p = QemuProvider(runner=_fake_runner(), iso_bin="genisoimage", work_dir=tmp_path)
     p.provision(

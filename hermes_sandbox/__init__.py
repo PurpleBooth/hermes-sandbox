@@ -696,7 +696,9 @@ def _sandbox_teardown_handler(args: dict[str, Any], **kwargs: Any) -> str:
     """Handler for sandbox_teardown tool.
 
     If ``vm_id`` is provided, destroys that specific VM via the provider
-    directly.  Otherwise, destroys the currently recorded sandbox VM.
+    directly — but only if it carries the ``hermes-sandbox=true`` label, so
+    the tool cannot destroy arbitrary VMs on the cloud account (CRITICAL-1).
+    Otherwise, destroys the currently recorded sandbox VM.
     """
     manager = _manager_or_build()
     if manager is None:
@@ -704,6 +706,17 @@ def _sandbox_teardown_handler(args: dict[str, Any], **kwargs: Any) -> str:
     try:
         vm_id = args.get("vm_id")
         if vm_id:
+            sandbox_vms = manager.provider.list_by_label("hermes-sandbox", "true")
+            if vm_id not in {v.id for v in sandbox_vms}:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"VM {vm_id} is not a sandbox VM "
+                            "(missing hermes-sandbox=true label). "
+                            "Refusing to tear down."
+                        )
+                    }
+                )
             manager.provider.teardown(vm_id)
             _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
             return json.dumps({"status": "ok", "message": f"VM {vm_id} torn down."})

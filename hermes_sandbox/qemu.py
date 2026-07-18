@@ -410,7 +410,13 @@ class QemuProvider(CloudProvider):
         pidfile, then cleans up the per-VM directory (overlay, seed ISO,
         ``vm.json``, console log).  A missing VM is a no-op, so teardown is
         safe to call from a separate process that has no in-memory registry.
+
+        Raises :class:`ValueError` if ``vm_id`` contains path separators or
+        parent references, which would otherwise allow path traversal outside
+        the work directory (HIGH-1).
         """
+        if "/" in vm_id or "\\" in vm_id or ".." in vm_id:
+            raise ValueError(f"Invalid vm_id: {vm_id!r}")
         self._vms.pop(vm_id, None)
         _kill_pidfile(self._work_dir / vm_id / "qemu.pid")
         vm_dir = self._work_dir / vm_id
