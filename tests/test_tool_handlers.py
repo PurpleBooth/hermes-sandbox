@@ -16,6 +16,7 @@ from hermes_sandbox.lifecycle import VMLifecycleManager
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+
 def _make_manager(tmp_path, fake_key_factory):
     """Build a VMLifecycleManager backed by the DryRunProvider."""
     provider = DryRunProvider()
@@ -349,6 +350,7 @@ class TestHandlerExceptionHandling:
     def test_provision_catches_exception(self, configured_manager, monkeypatch):
         def boom(*args, **kwargs):
             raise RuntimeError("cloud API down")
+
         monkeypatch.setattr(configured_manager, "ensure_vm", boom)
         result = hermes_sandbox._sandbox_provision_handler({})
         data = json.loads(result)
@@ -358,6 +360,7 @@ class TestHandlerExceptionHandling:
     def test_teardown_catches_exception(self, configured_manager, monkeypatch):
         def boom(*args, **kwargs):
             raise RuntimeError("teardown failed")
+
         monkeypatch.setattr(configured_manager, "teardown", boom)
         result = hermes_sandbox._sandbox_teardown_handler({})
         data = json.loads(result)
@@ -367,6 +370,7 @@ class TestHandlerExceptionHandling:
     def test_recreate_catches_exception(self, configured_manager, monkeypatch):
         def boom(*args, **kwargs):
             raise RuntimeError("recreate failed")
+
         monkeypatch.setattr(configured_manager, "recreate", boom)
         result = hermes_sandbox._sandbox_recreate_handler({})
         data = json.loads(result)
@@ -376,6 +380,7 @@ class TestHandlerExceptionHandling:
     def test_list_catches_exception(self, configured_manager, monkeypatch):
         def boom(*args, **kwargs):
             raise RuntimeError("list failed")
+
         monkeypatch.setattr(configured_manager, "list_vms", boom)
         result = hermes_sandbox._sandbox_list_handler({})
         data = json.loads(result)
@@ -385,6 +390,7 @@ class TestHandlerExceptionHandling:
     def test_cleanup_catches_exception(self, configured_manager, monkeypatch):
         def boom(*args, **kwargs):
             raise RuntimeError("cleanup failed")
+
         monkeypatch.setattr(configured_manager, "cleanup_strays", boom)
         result = hermes_sandbox._sandbox_cleanup_handler({"confirm": True})
         data = json.loads(result)

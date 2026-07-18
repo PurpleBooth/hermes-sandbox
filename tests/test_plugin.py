@@ -150,7 +150,10 @@ def test_on_session_end_teardowns_when_auto(tmp_path, fake_key_factory, monkeypa
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
     mgr = VMLifecycleManager(
-        provider=provider, config=config, hermes_home=hermes_home, key_factory=fake_key_factory,
+        provider=provider,
+        config=config,
+        hermes_home=hermes_home,
+        key_factory=fake_key_factory,
         ssh_probe=lambda **kwargs: True,
     )
     monkeypatch.setattr(hermes_sandbox, "_manager", mgr)
