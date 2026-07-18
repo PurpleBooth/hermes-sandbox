@@ -111,7 +111,7 @@ def _base_packages() -> list[str]:
 
 
 _YQ_INSTALL_CMD = (
-    'YQ_VER=$(curl -sL https://api.github.com/repos/mikefarah/yq/releases/latest | grep tag_name | cut -d \'"\' -f4)\n'
+    "YQ_VER=$(curl -sL https://api.github.com/repos/mikefarah/yq/releases/latest | grep tag_name | cut -d '\"' -f4)\n"
     'wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VER}/yq_linux_amd64"\n'
     "chmod +x /usr/local/bin/yq"
 )
@@ -170,9 +170,7 @@ def _base_cloud_init_config(public_key: str) -> dict[str, Any]:
             {
                 "path": "/etc/ssh/sshd_config.d/99-sandbox-hardening.conf",
                 "content": (
-                    "PermitRootLogin no\n"
-                    "PasswordAuthentication no\n"
-                    "PubkeyAuthentication yes\n"
+                    "PermitRootLogin no\nPasswordAuthentication no\nPubkeyAuthentication yes\n"
                 ),
                 "permissions": "0644",
                 "owner": "root:root",
@@ -221,6 +219,7 @@ def build_cloud_init_user_data(
     apt_repos: tuple[str, ...] = (),
     extra_packages: tuple[str, ...] = (),
     setup_commands: tuple[str, ...] = (),
+    netrc_content: str | None = None,
 ) -> str:
     """Return cloud-init user-data that creates the ``hermes`` user.
 
@@ -245,6 +244,11 @@ def build_cloud_init_user_data(
     SSH session, so the forwarded values are injected at the process level
     — no shell sourcing, login shell, or snapshot dependency required.
 
+    When *netrc_content* is non-empty, a ``write_files`` entry is added that
+    writes the body to ``/home/hermes/.netrc`` with mode ``0600`` and owner
+    ``hermes:hermes``.  curl/git use this automatically for HTTPS auth
+    without putting tokens in the process environment.
+
     *apt_repos* lines are injected as ``apt_sources`` entries (before the
     ``packages`` list) so the VM can install packages from third-party
     repositories.  *extra_packages* are appended to the ``packages`` list.
@@ -257,15 +261,24 @@ def build_cloud_init_user_data(
     # Rebuild the dict so apt_sources is ordered before packages (cloud-init
     # processes keys independently, but keeping a natural order is cleaner and
     # the tests assert on source ordering).
-    apt_sources = (
-        [{"source": repo} for repo in apt_repos] if apt_repos else None
-    )
+    apt_sources = [{"source": repo} for repo in apt_repos] if apt_repos else None
+
+    write_files = list(config["write_files"])
+    if netrc_content:
+        write_files.append(
+            {
+                "path": "/home/hermes/.netrc",
+                "content": netrc_content,
+                "permissions": "0600",
+                "owner": "hermes:hermes",
+            }
+        )
 
     ordered: dict[str, Any] = {}
     ordered["package_update"] = config["package_update"]
     ordered["ssh_pwauth"] = config["ssh_pwauth"]
     ordered["users"] = config["users"]
-    ordered["write_files"] = config["write_files"]
+    ordered["write_files"] = write_files
     if apt_sources:
         ordered["apt_sources"] = apt_sources
     if extra_packages:
@@ -336,6 +349,7 @@ class CloudProvider(ABC):
         apt_repos: tuple[str, ...] = (),
         extra_packages: tuple[str, ...] = (),
         setup_commands: tuple[str, ...] = (),
+        netrc_content: str | None = None,
     ) -> VMInstance:
         """Create (or reuse) a VM and return its description.
 
@@ -350,6 +364,9 @@ class CloudProvider(ABC):
         *extra_packages* are appended to the ``packages`` list, and
         *setup_commands* are appended to the ``runcmd`` list.  All three
         are additive to the base template.
+
+        When *netrc_content* is non-empty, cloud-init writes it to
+        ``/home/hermes/.netrc`` (mode 0600).
         """
 
     @abstractmethod

@@ -198,9 +198,7 @@ def test_build_cloud_init_blocks_root_login():
 
     config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
     sshd_config = [f for f in config["write_files"] if "sshd_config" in f["path"]][0]
-    assert "PermitRootLogin no" in sshd_config["content"], (
-        "sshd config must set PermitRootLogin no"
-    )
+    assert "PermitRootLogin no" in sshd_config["content"], "sshd config must set PermitRootLogin no"
 
 
 def test_build_cloud_init_requires_pubkey_authentication():
@@ -342,9 +340,7 @@ def test_build_cloud_init_forward_env_none_no_etc_environment():
 
     config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", forward_env=None))
     runcmd_str = " ".join(config["runcmd"])
-    assert "/etc/environment" not in runcmd_str, (
-        "None forward_env must not touch /etc/environment"
-    )
+    assert "/etc/environment" not in runcmd_str, "None forward_env must not touch /etc/environment"
 
 
 def test_build_cloud_init_forward_env_prepends_to_runcmd():
@@ -365,12 +361,70 @@ def test_build_cloud_init_forward_env_prepends_to_runcmd():
         "/etc/environment must NOT be in write_files (uses runcmd instead)"
     )
     first_runcmd = config["runcmd"][0]
-    assert "/etc/environment" in first_runcmd, (
-        "first runcmd entry must append to /etc/environment"
-    )
+    assert "/etc/environment" in first_runcmd, "first runcmd entry must append to /etc/environment"
     assert "'FOO'" in first_runcmd and "'bar'" in first_runcmd, (
         "the forwarded var must be in the runcmd"
     )
+
+
+# ── netrc_content → cloud-init write_files ─────────────────────────────────
+
+
+def test_build_cloud_init_without_netrc_has_no_netrc_file():
+    """Without netrc_content the user-data must NOT write /home/hermes/.netrc."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA"))
+    paths = [f["path"] for f in config["write_files"]]
+    assert "/home/hermes/.netrc" not in paths, "no .netrc write_files entry by default"
+
+
+def test_build_cloud_init_with_netrc_writes_file():
+    """netrc_content is written to /home/hermes/.netrc with mode 0600."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    body = "machine github.com\nlogin x-access-token\npassword ghp_test\n"
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", netrc_content=body))
+    entries = [f for f in config["write_files"] if f["path"] == "/home/hermes/.netrc"]
+    assert len(entries) == 1, "exactly one .netrc write_files entry"
+    entry = entries[0]
+    assert entry["content"] == body
+    assert entry["permissions"] == "0600"
+    assert entry["owner"] == "hermes:hermes"
+
+
+def test_build_cloud_init_netrc_empty_string_no_file():
+    """An empty netrc_content string must not write .netrc."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", netrc_content=""))
+    paths = [f["path"] for f in config["write_files"]]
+    assert "/home/hermes/.netrc" not in paths
+
+
+def test_build_cloud_init_netrc_none_no_file():
+    """netrc_content=None must not write .netrc."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", netrc_content=None))
+    paths = [f["path"] for f in config["write_files"]]
+    assert "/home/hermes/.netrc" not in paths
+
+
+def test_build_cloud_init_netrc_keeps_other_write_files():
+    """Adding .netrc must not drop SSH hardening or AGENTS.md entries."""
+    from hermes_sandbox.provider import build_cloud_init_user_data
+
+    config = _parse_user_data(
+        build_cloud_init_user_data(
+            "ssh-ed25519 AAAA",
+            netrc_content="machine x\nlogin y\npassword z\n",
+        )
+    )
+    paths = {f["path"] for f in config["write_files"]}
+    assert "/etc/ssh/sshd_config.d/99-sandbox-hardening.conf" in paths
+    assert "/home/hermes/AGENTS.md" in paths
+    assert "/home/hermes/.netrc" in paths
 
 
 # ── apt_repos → cloud-init apt_sources ──────────────────────────────────────
@@ -480,12 +534,8 @@ def test_build_cloud_init_with_setup_commands_appends_to_runcmd():
     from hermes_sandbox.provider import build_cloud_init_user_data
 
     cmds = ("echo custom-setup-done", "curl -fsSL https://example.com/install.sh | sh")
-    config = _parse_user_data(
-        build_cloud_init_user_data("ssh-ed25519 AAAA", setup_commands=cmds)
-    )
-    assert "echo custom-setup-done" in config["runcmd"], (
-        "first setup command must appear in runcmd"
-    )
+    config = _parse_user_data(build_cloud_init_user_data("ssh-ed25519 AAAA", setup_commands=cmds))
+    assert "echo custom-setup-done" in config["runcmd"], "first setup command must appear in runcmd"
     assert "curl -fsSL https://example.com/install.sh | sh" in config["runcmd"], (
         "second setup command must appear in runcmd"
     )

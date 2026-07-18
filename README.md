@@ -50,6 +50,9 @@ table of provider-specific defaults):
     SANDBOX_NAME=hermes-sandbox           # VM name
     SANDBOX_AUTO_TEARDOWN_SECONDS=0       # 0 = keep across sessions; >0 = teardown on session end
     SANDBOX_MODE=shared                   # shared = one VM for all; isolated = one VM per session
+    SANDBOX_NETRC=github.com:GITHUB_TOKEN,codeberg.org:CODEBERG_TOKEN
+                                          # writes /home/hermes/.netrc (0600) for git HTTPS auth
+    # SANDBOX_FORWARD_ENV=FOO,BAR         # optional: also forward plain env vars into /etc/environment
 
 Only cloud providers need a token. The `dry-run` and `qemu` providers are
 always configured.

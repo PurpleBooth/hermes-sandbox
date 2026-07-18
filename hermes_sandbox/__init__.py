@@ -24,6 +24,10 @@ Configuration (env vars; put secrets in ``~/.hermes/.env``):
                                     isolated = one VM per session
   SANDBOX_FORWARD_ENV       Comma-separated env var names forwarded into the VM
                                     at provision time (e.g. GITHUB_TOKEN,CODEBERG_TOKEN)
+  SANDBOX_NETRC             Comma-separated netrc machine specs written to
+                                    /home/hermes/.netrc (mode 0600) at provision time.
+                                    Forms: machine:PASSWORD_ENV or machine:login:PASSWORD_ENV
+                                    Example: github.com:GITHUB_TOKEN,codeberg.org:CODEBERG_TOKEN
 
 The plugin leaves ``terminal.backend`` as ``ssh`` in config.yaml (set via
 ``hermes sandbox enable``) and only manages the SSH connection details
@@ -609,7 +613,9 @@ def _sandbox_status_handler(args: dict[str, Any], **kwargs: Any) -> str:
     """Handler for sandbox_status tool."""
     manager = _manager_or_build()
     if manager is None:
-        return json.dumps({"error": "Sandbox not configured. Set SANDBOX_PROVIDER and a cloud token."})
+        return json.dumps(
+            {"error": "Sandbox not configured. Set SANDBOX_PROVIDER and a cloud token."}
+        )
     st = manager.status()
     if not st:
         return json.dumps({"status": "no_vm", "message": "No sandbox VM recorded."})
@@ -625,7 +631,9 @@ def _sandbox_provision_handler(args: dict[str, Any], **kwargs: Any) -> str:
         vm = manager.ensure_vm()
         _apply_ssh_env(manager)
         _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
-        return json.dumps({"status": "ok", "vm_id": vm.id, "ip": vm.preferred_ip(), "provider": vm.provider})
+        return json.dumps(
+            {"status": "ok", "vm_id": vm.id, "ip": vm.preferred_ip(), "provider": vm.provider}
+        )
     except Exception as exc:
         return json.dumps({"error": f"Provisioning failed: {exc}"})
 
@@ -647,7 +655,12 @@ def _sandbox_teardown_handler(args: dict[str, Any], **kwargs: Any) -> str:
             return json.dumps({"status": "ok", "message": f"VM {vm_id} torn down."})
         ok = manager.teardown()
         _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
-        return json.dumps({"status": "ok" if ok else "no_vm", "message": "VM torn down." if ok else "No VM to tear down."})
+        return json.dumps(
+            {
+                "status": "ok" if ok else "no_vm",
+                "message": "VM torn down." if ok else "No VM to tear down.",
+            }
+        )
     except Exception as exc:
         return json.dumps({"error": f"Teardown failed: {exc}"})
 
@@ -661,7 +674,9 @@ def _sandbox_recreate_handler(args: dict[str, Any], **kwargs: Any) -> str:
         vm = manager.recreate()
         _apply_ssh_env(manager)
         _invalidate_cached_terminal_env(kwargs.get("task_id", "default"))
-        return json.dumps({"status": "ok", "vm_id": vm.id, "ip": vm.preferred_ip(), "provider": vm.provider})
+        return json.dumps(
+            {"status": "ok", "vm_id": vm.id, "ip": vm.preferred_ip(), "provider": vm.provider}
+        )
     except Exception as exc:
         return json.dumps({"error": f"Recreate failed: {exc}"})
 
@@ -675,15 +690,22 @@ def _sandbox_list_handler(args: dict[str, Any], **kwargs: Any) -> str:
         vms = manager.list_vms()
         if not vms:
             return json.dumps({"status": "ok", "vms": []})
-        return json.dumps({
-            "status": "ok",
-            "vms": [
-                {"id": vm.id, "name": vm.name, "provider": vm.provider,
-                 "status": "running" if vm.is_running() else vm.status,
-                 "ip": vm.preferred_ip(), "region": vm.region}
-                for vm in vms
-            ],
-        })
+        return json.dumps(
+            {
+                "status": "ok",
+                "vms": [
+                    {
+                        "id": vm.id,
+                        "name": vm.name,
+                        "provider": vm.provider,
+                        "status": "running" if vm.is_running() else vm.status,
+                        "ip": vm.preferred_ip(),
+                        "region": vm.region,
+                    }
+                    for vm in vms
+                ],
+            }
+        )
     except Exception as exc:
         return json.dumps({"error": f"List failed: {exc}"})
 
@@ -704,12 +726,18 @@ def _sandbox_cleanup_handler(args: dict[str, Any], **kwargs: Any) -> str:
         cloud_vms = manager.list_vms()
         strays = [vm.id for vm in cloud_vms if vm.id not in known]
         if not args.get("confirm", False):
-            return json.dumps({"status": "ok", "would_destroy": strays,
-                               "destroyed": [],
-                               "message": "Pass confirm=true to actually destroy these VMs."})
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "would_destroy": strays,
+                    "destroyed": [],
+                    "message": "Pass confirm=true to actually destroy these VMs.",
+                }
+            )
         destroyed = manager.cleanup_strays(known)
-        return json.dumps({"status": "ok", "destroyed": destroyed if destroyed else [],
-                           "would_destroy": []})
+        return json.dumps(
+            {"status": "ok", "destroyed": destroyed if destroyed else [], "would_destroy": []}
+        )
     except Exception as exc:
         return json.dumps({"error": f"Cleanup failed: {exc}"})
 
@@ -759,8 +787,7 @@ def _eager_wire_ssh_env() -> None:
         return
     if not vm.is_running() or not vm.preferred_ip():
         logger.warning(
-            "sandbox: recorded VM %s is not running — "
-            "on_session_start will reprovision",
+            "sandbox: recorded VM %s is not running — on_session_start will reprovision",
             state.vm_id,
         )
         return
