@@ -94,6 +94,7 @@ class DigitalOceanProvider(RestCloudProvider):
         apt_repos: tuple[str, ...] = (),
         extra_packages: tuple[str, ...] = (),
         setup_commands: tuple[str, ...] = (),
+        netrc_content: str | None = None,
     ) -> VMInstance:
         """Create a droplet and block until it is active with a public IP."""
         key_id = self._ensure_ssh_key(ssh_public_key)
@@ -113,6 +114,7 @@ class DigitalOceanProvider(RestCloudProvider):
                 apt_repos=apt_repos,
                 extra_packages=extra_packages,
                 setup_commands=setup_commands,
+                netrc_content=netrc_content,
             ),
         }
         resp = self._request("POST", "/droplets", self.token, body=body)

@@ -59,6 +59,7 @@ class DryRunProvider(CloudProvider):
         apt_repos: tuple[str, ...] = (),
         extra_packages: tuple[str, ...] = (),
         setup_commands: tuple[str, ...] = (),
+        netrc_content: str | None = None,
     ) -> VMInstance:
         vm_id = str(uuid.uuid4())
         vm = VMInstance(
@@ -75,6 +76,7 @@ class DryRunProvider(CloudProvider):
                 "apt_repos": apt_repos,
                 "extra_packages": extra_packages,
                 "setup_commands": setup_commands,
+                "netrc_content": netrc_content or "",
             },
         )
         self._vms[vm_id] = vm

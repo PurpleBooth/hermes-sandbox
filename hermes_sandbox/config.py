@@ -14,6 +14,28 @@ from .provider import CloudProvider
 
 DEFAULT_SSH_USER = CloudProvider.default_ssh_user
 
+# Default netrc logins for known git hosts when SANDBOX_NETRC uses the
+# two-field form ``machine:PASSWORD_ENV``.
+_DEFAULT_NETRC_LOGINS: dict[str, str] = {
+    "github.com": "x-access-token",
+    "api.github.com": "x-access-token",
+    "codeberg.org": "oauth2",
+    "gitlab.com": "oauth2",
+}
+
+
+@dataclass(frozen=True)
+class NetrcSpec:
+    """One netrc machine mapping configured via ``SANDBOX_NETRC``.
+
+    ``login`` is optional. When omitted, a host-specific default is used
+    (e.g. ``x-access-token`` for github.com, ``oauth2`` otherwise).
+    """
+
+    machine: str
+    password_env: str
+    login: str | None = None
+
 
 @dataclass(frozen=True)
 class SandboxConfig:
@@ -33,8 +55,15 @@ class SandboxConfig:
     # shared = one VM for all sessions (default); isolated = one VM per session.
     mode: str = "shared"
     # Env var names forwarded from the caller's process into the VM at provision
-    # time via cloud-init write_files (e.g. ("GITHUB_TOKEN", "CODEBERG_TOKEN")).
+    # time via cloud-init append to /etc/environment
+    # (e.g. ("GITHUB_TOKEN", "CODEBERG_TOKEN")).
     forward_env: tuple[str, ...] = ()
+    # Netrc machine specs resolved at provision time into /home/hermes/.netrc
+    # via cloud-init write_files (0600, hermes:hermes).
+    # Configured by SANDBOX_NETRC, e.g.
+    # "github.com:GITHUB_TOKEN,codeberg.org:CODEBERG_TOKEN" or the full form
+    # "github.com:x-access-token:GITHUB_TOKEN".
+    netrc_specs: tuple[NetrcSpec, ...] = ()
     # 0 = no TTL reaping (default); >0 = tear down VM when unused for N seconds.
     vm_ttl_seconds: int = 0
     # Additional apt repository lines injected as cloud-init ``apt_sources``
@@ -72,25 +101,18 @@ class SandboxConfig:
             auto_teardown_seconds=int(_get("SANDBOX_AUTO_TEARDOWN_SECONDS", "0") or "0"),
             mode=_get("SANDBOX_MODE", "shared"),
             forward_env=tuple(
-                name.strip()
-                for name in _get("SANDBOX_FORWARD_ENV", "").split(",")
-                if name.strip()
+                name.strip() for name in _get("SANDBOX_FORWARD_ENV", "").split(",") if name.strip()
             ),
+            netrc_specs=_parse_netrc_specs(_get("SANDBOX_NETRC", "")),
             vm_ttl_seconds=int(_get("SANDBOX_VM_TTL_SECONDS", "0") or "0"),
             apt_repos=tuple(
-                line.strip()
-                for line in _get("SANDBOX_APT_REPOS", "").splitlines()
-                if line.strip()
+                line.strip() for line in _get("SANDBOX_APT_REPOS", "").splitlines() if line.strip()
             ),
             extra_packages=tuple(
-                name.strip()
-                for name in _get("SANDBOX_PACKAGES", "").split(",")
-                if name.strip()
+                name.strip() for name in _get("SANDBOX_PACKAGES", "").split(",") if name.strip()
             ),
             setup_commands=tuple(
-                cmd.strip()
-                for cmd in _get("SANDBOX_SETUP_CMDS", "").splitlines()
-                if cmd.strip()
+                cmd.strip() for cmd in _get("SANDBOX_SETUP_CMDS", "").splitlines() if cmd.strip()
             ),
         )
 
@@ -101,6 +123,49 @@ class SandboxConfig:
         ``qemu`` providers run locally and need no token.
         """
         return bool(self.token) or self.provider_name in ("dry-run", "qemu")
+
+
+def _parse_netrc_specs(raw: str) -> tuple[NetrcSpec, ...]:
+    """Parse ``SANDBOX_NETRC`` into :class:`NetrcSpec` entries.
+
+    Accepted per-entry forms (comma-separated):
+
+    * ``machine:PASSWORD_ENV`` — login is chosen from host defaults
+      (``x-access-token`` for github.com; ``oauth2`` otherwise).
+    * ``machine:login:PASSWORD_ENV`` — explicit login name.
+
+    Whitespace around fields is trimmed. Empty segments are ignored.
+    Invalid entries (wrong field count) are skipped.
+    """
+    specs: list[NetrcSpec] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = [b.strip() for b in part.split(":")]
+        if len(bits) == 2 and bits[0] and bits[1]:
+            specs.append(NetrcSpec(machine=bits[0], password_env=bits[1]))
+        elif len(bits) == 3 and bits[0] and bits[1] and bits[2]:
+            specs.append(NetrcSpec(machine=bits[0], login=bits[1], password_env=bits[2]))
+        # else: skip malformed entries rather than fail config load
+    return tuple(specs)
+
+
+def default_netrc_login(machine: str) -> str:
+    """Return the conventional netrc login for *machine*."""
+    return _DEFAULT_NETRC_LOGINS.get(machine.casefold(), "oauth2")
+
+
+def format_netrc(entries: list[tuple[str, str, str]]) -> str:
+    """Render ``[(machine, login, password), ...]`` as a ``.netrc`` file body.
+
+    machines are separated by a blank line. Password values are written
+    literally — callers must ensure the destination file is mode ``0600``.
+    """
+    blocks: list[str] = []
+    for machine, login, password in entries:
+        blocks.append(f"machine {machine}\nlogin {login}\npassword {password}\n")
+    return "\n".join(blocks)
 
 
 def _resolve_token(provider_name: str, env: dict[str, str]) -> str:

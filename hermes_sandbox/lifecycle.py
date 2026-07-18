@@ -44,6 +44,7 @@ def _resolve_default_ssh_probe() -> Callable[..., bool]:
         _DEFAULT_SSH_PROBE = wait_for_ssh
     return _DEFAULT_SSH_PROBE
 
+
 LABEL_KEY = "hermes-sandbox"
 LABEL_VALUE = "true"
 
@@ -216,11 +217,32 @@ class VMLifecycleManager:
         if not self.config.forward_env:
             return None
         resolved = {
-            name: os.environ[name]
-            for name in self.config.forward_env
-            if os.environ.get(name)
+            name: os.environ[name] for name in self.config.forward_env if os.environ.get(name)
         }
         return resolved or None
+
+    def _resolve_netrc_content(self) -> str | None:
+        """Build a ``.netrc`` body from ``config.netrc_specs`` and ``os.environ``.
+
+        Each :class:`~hermes_sandbox.config.NetrcSpec` is resolved against
+        the process environment. Specs whose password env var is missing
+        or empty are skipped. Returns ``None`` when no complete entries
+        can be built so providers skip the write_files injection.
+        """
+        from .config import default_netrc_login, format_netrc
+
+        if not self.config.netrc_specs:
+            return None
+        entries: list[tuple[str, str, str]] = []
+        for spec in self.config.netrc_specs:
+            password = os.environ.get(spec.password_env, "")
+            if not password:
+                continue
+            login = spec.login or default_netrc_login(spec.machine)
+            entries.append((spec.machine, login, password))
+        if not entries:
+            return None
+        return format_netrc(entries)
 
     def status(self) -> SandboxStatus | None:
         """Return the recorded state, refreshed against the provider if alive."""
@@ -317,6 +339,7 @@ class VMLifecycleManager:
         kp = self.keypair()
         labels = {LABEL_KEY: LABEL_VALUE}
         forward_env = self._resolve_forward_env()
+        netrc_content = self._resolve_netrc_content()
         vm = self.provider.provision(
             name=self.config.vm_name,
             instance_type=self.config.instance_type,
@@ -328,6 +351,7 @@ class VMLifecycleManager:
             apt_repos=self.config.apt_repos,
             extra_packages=self.config.extra_packages,
             setup_commands=self.config.setup_commands,
+            netrc_content=netrc_content,
         )
         # Bug 1: the provider polls until the cloud API says "running", but
         # the SSH daemon may not be ready yet (cloud-init still running,

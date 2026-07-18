@@ -118,6 +118,7 @@ class HetznerProvider(RestCloudProvider):
         apt_repos: tuple[str, ...] = (),
         extra_packages: tuple[str, ...] = (),
         setup_commands: tuple[str, ...] = (),
+        netrc_content: str | None = None,
     ) -> VMInstance:
         """Create a server and block until it has a public IPv4."""
         labels = labels or {}
@@ -139,6 +140,7 @@ class HetznerProvider(RestCloudProvider):
                     apt_repos=apt_repos,
                     extra_packages=extra_packages,
                     setup_commands=setup_commands,
+                    netrc_content=netrc_content,
                 ).encode("utf-8")
             ).decode("ascii"),
         }

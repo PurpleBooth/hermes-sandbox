@@ -63,11 +63,11 @@ see the [QEMU task guide](../tasks/qemu-provider.md).
 | `SANDBOX_FORWARD_ENV` | *(empty)* | Comma-separated env var names forwarded into the VM at provision time |
 
 When `SANDBOX_FORWARD_ENV` is set, the named env vars are read from the
-caller's process and injected into the VM via a cloud-init `write_files`
-entry at `/etc/environment`.  The file is owned by `root:root` with
-`0644` permissions.  PAM (`pam_env`) reads `/etc/environment` during
-every SSH session, so the values are available in the process
-environment without any shell sourcing or snapshot dependency.
+caller's process and appended into the VM's `/etc/environment` via a
+cloud-init `runcmd` entry (append, not clobber).  PAM (`pam_env`) reads
+`/etc/environment` during every SSH session, so the values are available
+in the process environment without any shell sourcing or snapshot
+dependency.
 
 Example: `SANDBOX_FORWARD_ENV=CODEBERG_TOKEN,GITHUB_TOKEN` forwards both
 tokens into the VM so workers running `git clone` / `git push` against
@@ -75,6 +75,53 @@ GitHub and Codeberg authenticate correctly.
 
 Values are set at provision time.  Rotating a token requires
 `hermes sandbox recreate`.
+
+## Netrc credentials
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SANDBOX_NETRC` | *(empty)* | Comma-separated machine specs written to `/home/hermes/.netrc` |
+
+Prefer this over `SANDBOX_FORWARD_ENV` for **git HTTPS authentication**.
+curl and git read `~/.netrc` automatically, so tokens do not need to live
+in the process environment.
+
+Each entry is one of:
+
+* `machine:PASSWORD_ENV` — login is chosen from host defaults
+  (`x-access-token` for `github.com` / `api.github.com`; `oauth2` otherwise)
+* `machine:login:PASSWORD_ENV` — explicit login name
+
+Example:
+
+```bash
+# in ~/.hermes/.env
+GITHUB_TOKEN=ghp_...
+CODEBERG_TOKEN=...
+SANDBOX_NETRC=github.com:GITHUB_TOKEN,codeberg.org:CODEBERG_TOKEN
+```
+
+This produces `/home/hermes/.netrc` at provision time:
+
+```netrc
+machine github.com
+login x-access-token
+password ghp_...
+
+machine codeberg.org
+login oauth2
+password ...
+```
+
+The file is owned by `hermes:hermes` with mode `0600`.  Specs whose
+password env var is missing or empty are skipped.  Rotating a token
+requires `hermes sandbox recreate`.
+
+Full-form example with an explicit login:
+
+```bash
+SANDBOX_NETRC=gitlab.com:oauth2:GITLAB_TOKEN
+```
 
 ## Package and setup customisation
 

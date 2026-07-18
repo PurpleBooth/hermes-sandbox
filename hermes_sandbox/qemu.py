@@ -124,6 +124,7 @@ def _build_cloud_init_seed(
     apt_repos: tuple[str, ...] = (),
     extra_packages: tuple[str, ...] = (),
     setup_commands: tuple[str, ...] = (),
+    netrc_content: str | None = None,
 ) -> Path:
     """Build a cloud-init NoCloud seed ISO containing the SSH public key.
 
@@ -138,8 +139,8 @@ def _build_cloud_init_seed(
     ``forward_env`` is passed through to :func:`build_cloud_init_user_data`
     so forwarded env vars are written to ``/etc/environment`` on the VM.
 
-    ``apt_repos``, ``extra_packages``, and ``setup_commands`` are likewise
-    forwarded to :func:`build_cloud_init_user_data`.
+    ``apt_repos``, ``extra_packages``, ``setup_commands``, and ``netrc_content``
+    are likewise forwarded to :func:`build_cloud_init_user_data`.
     """
     seed_dir = dest / "cidata"
     seed_dir.mkdir(parents=True, exist_ok=True)
@@ -150,6 +151,7 @@ def _build_cloud_init_seed(
             apt_repos=apt_repos,
             extra_packages=extra_packages,
             setup_commands=setup_commands,
+            netrc_content=netrc_content,
         )
     )
     (seed_dir / "meta-data").write_text(_CLOUD_INIT_META_DATA)
@@ -278,6 +280,7 @@ class QemuProvider(CloudProvider):
         apt_repos: tuple[str, ...] = (),
         extra_packages: tuple[str, ...] = (),
         setup_commands: tuple[str, ...] = (),
+        netrc_content: str | None = None,
     ) -> VMInstance:
         """Provision a local QEMU VM and return its :class:`VMInstance` description.
 
@@ -327,6 +330,7 @@ class QemuProvider(CloudProvider):
             apt_repos=apt_repos,
             extra_packages=extra_packages,
             setup_commands=setup_commands,
+            netrc_content=netrc_content,
         )
 
         # QEMU records its daemon PID here so teardown can SIGTERM it directly.

@@ -10,7 +10,9 @@ from hermes_sandbox.dry_run import DryRunProvider
 from hermes_sandbox.lifecycle import VMLifecycleManager
 
 
-def make_manager(tmp_path, provider=None, config=None, fake_key_factory=None, clock=None, ssh_probe=None):
+def make_manager(
+    tmp_path, provider=None, config=None, fake_key_factory=None, clock=None, ssh_probe=None
+):
     provider = provider or DryRunProvider()
     config = config or SandboxConfig(provider_name="dry-run", token="", ssh_user="root")
     hermes_home = tmp_path / ".hermes"
@@ -721,9 +723,7 @@ def test_config_forward_env_single_name(monkeypatch):
 def test_resolve_forward_env_returns_none_when_not_configured(tmp_path):
     """_resolve_forward_env returns None when config.forward_env is empty."""
     mgr = make_manager(tmp_path)
-    assert mgr._resolve_forward_env() is None, (
-        "empty forward_env must return None (no injection)"
-    )
+    assert mgr._resolve_forward_env() is None, "empty forward_env must return None (no injection)"
 
 
 def test_resolve_forward_env_reads_from_environ(tmp_path, monkeypatch):
@@ -786,6 +786,175 @@ def test_ensure_vm_no_forward_env_when_not_configured(tmp_path, fake_key_factory
     vm = mgr.ensure_vm()
     assert vm.extra.get("forward_env") == {}, (
         f"forward_env must be empty dict when not configured, got {vm.extra.get('forward_env')!r}"
+    )
+
+
+# ── SANDBOX_NETRC config parsing ───────────────────────────────────────────
+
+
+def test_config_netrc_defaults_empty(monkeypatch):
+    """Without SANDBOX_NETRC, netrc_specs is an empty tuple."""
+    from hermes_sandbox.config import SandboxConfig
+
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.delenv("SANDBOX_NETRC", raising=False)
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.netrc_specs == (), "netrc_specs must default to empty tuple"
+
+
+def test_config_netrc_two_field_form(monkeypatch):
+    """machine:PASSWORD_ENV form is accepted."""
+    from hermes_sandbox.config import SandboxConfig
+
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_NETRC", "github.com:GITHUB_TOKEN,codeberg.org:CODEBERG_TOKEN")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert len(cfg.netrc_specs) == 2
+    assert cfg.netrc_specs[0].machine == "github.com"
+    assert cfg.netrc_specs[0].password_env == "GITHUB_TOKEN"
+    assert cfg.netrc_specs[0].login is None
+    assert cfg.netrc_specs[1].machine == "codeberg.org"
+    assert cfg.netrc_specs[1].password_env == "CODEBERG_TOKEN"
+
+
+def test_config_netrc_three_field_form(monkeypatch):
+    """machine:login:PASSWORD_ENV form is accepted."""
+    from hermes_sandbox.config import SandboxConfig
+
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_NETRC", "gitlab.com:oauth2:GITLAB_TOKEN")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert len(cfg.netrc_specs) == 1
+    assert cfg.netrc_specs[0].machine == "gitlab.com"
+    assert cfg.netrc_specs[0].login == "oauth2"
+    assert cfg.netrc_specs[0].password_env == "GITLAB_TOKEN"
+
+
+def test_config_netrc_trims_whitespace(monkeypatch):
+    """Whitespace around fields is trimmed."""
+    from hermes_sandbox.config import SandboxConfig
+
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv(
+        "SANDBOX_NETRC", " github.com : GITHUB_TOKEN , codeberg.org : oauth2 : CODEBERG_TOKEN "
+    )
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert cfg.netrc_specs[0].machine == "github.com"
+    assert cfg.netrc_specs[0].password_env == "GITHUB_TOKEN"
+    assert cfg.netrc_specs[1].machine == "codeberg.org"
+    assert cfg.netrc_specs[1].login == "oauth2"
+    assert cfg.netrc_specs[1].password_env == "CODEBERG_TOKEN"
+
+
+def test_config_netrc_skips_malformed(monkeypatch):
+    """Malformed segments are skipped rather than failing config load."""
+    from hermes_sandbox.config import SandboxConfig
+
+    monkeypatch.setenv("SANDBOX_PROVIDER", "dry-run")
+    monkeypatch.setenv("SANDBOX_NETRC", "github.com:GITHUB_TOKEN,not-a-valid-entry,a:b:c:d")
+    cfg = SandboxConfig.from_env(__import__("os").environ)
+    assert len(cfg.netrc_specs) == 1
+    assert cfg.netrc_specs[0].machine == "github.com"
+
+
+def test_default_netrc_login_github():
+    from hermes_sandbox.config import default_netrc_login
+
+    assert default_netrc_login("github.com") == "x-access-token"
+    assert default_netrc_login("api.github.com") == "x-access-token"
+    assert default_netrc_login("codeberg.org") == "oauth2"
+    assert default_netrc_login("example.com") == "oauth2"
+
+
+def test_format_netrc_body():
+    from hermes_sandbox.config import format_netrc
+
+    body = format_netrc(
+        [
+            ("github.com", "x-access-token", "ghp_x"),
+            ("codeberg.org", "oauth2", "cb_y"),
+        ]
+    )
+    assert "machine github.com\nlogin x-access-token\npassword ghp_x\n" in body
+    assert "machine codeberg.org\nlogin oauth2\npassword cb_y\n" in body
+
+
+# ── netrc lifecycle threading ──────────────────────────────────────────────
+
+
+def test_resolve_netrc_returns_none_when_not_configured(tmp_path):
+    """_resolve_netrc_content returns None when config.netrc_specs is empty."""
+    mgr = make_manager(tmp_path)
+    assert mgr._resolve_netrc_content() is None
+
+
+def test_resolve_netrc_builds_body(tmp_path, monkeypatch):
+    """_resolve_netrc_content builds a .netrc body from specs + environ."""
+    from hermes_sandbox.config import NetrcSpec, SandboxConfig
+
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        netrc_specs=(
+            NetrcSpec(machine="github.com", password_env="GITHUB_TOKEN"),
+            NetrcSpec(machine="codeberg.org", password_env="CODEBERG_TOKEN", login="oauth2"),
+            NetrcSpec(machine="missing.example", password_env="MISSING_TOKEN"),
+        ),
+    )
+    mgr = make_manager(tmp_path, config=cfg)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_abc")
+    monkeypatch.setenv("CODEBERG_TOKEN", "cb_def")
+    monkeypatch.delenv("MISSING_TOKEN", raising=False)
+    body = mgr._resolve_netrc_content()
+    assert body is not None
+    assert "machine github.com\nlogin x-access-token\npassword ghp_abc\n" in body
+    assert "machine codeberg.org\nlogin oauth2\npassword cb_def\n" in body
+    assert "missing.example" not in body
+
+
+def test_resolve_netrc_returns_none_when_all_missing(tmp_path, monkeypatch):
+    """_resolve_netrc_content returns None when no password env vars are set."""
+    from hermes_sandbox.config import NetrcSpec, SandboxConfig
+
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        netrc_specs=(NetrcSpec(machine="github.com", password_env="GITHUB_TOKEN"),),
+    )
+    mgr = make_manager(tmp_path, config=cfg)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert mgr._resolve_netrc_content() is None
+
+
+def test_ensure_vm_passes_netrc_content_to_provider(tmp_path, fake_key_factory, monkeypatch):
+    """ensure_vm() resolves SANDBOX_NETRC and passes netrc_content to provision()."""
+    from hermes_sandbox.config import NetrcSpec, SandboxConfig
+
+    cfg = SandboxConfig(
+        provider_name="dry-run",
+        token="",
+        ssh_user="root",
+        netrc_specs=(NetrcSpec(machine="github.com", password_env="GITHUB_TOKEN"),),
+    )
+    provider = DryRunProvider()
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_lifecycle")
+    mgr = make_manager(tmp_path, provider=provider, config=cfg, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    body = vm.extra.get("netrc_content", "")
+    assert "machine github.com" in body
+    assert "password ghp_lifecycle" in body
+    assert "login x-access-token" in body
+
+
+def test_ensure_vm_no_netrc_when_not_configured(tmp_path, fake_key_factory):
+    """ensure_vm() does not set netrc_content when config.netrc_specs is empty."""
+    provider = DryRunProvider()
+    mgr = make_manager(tmp_path, provider=provider, fake_key_factory=fake_key_factory)
+    vm = mgr.ensure_vm()
+    assert vm.extra.get("netrc_content") == "", (
+        f"netrc_content must be empty when not configured, got {vm.extra.get('netrc_content')!r}"
     )
 
 
@@ -1016,9 +1185,7 @@ def test_ensure_vm_probes_ssh_on_reuse(tmp_path, fake_key_factory):
     mgr.ensure_vm()
     probe_calls.clear()
     mgr.ensure_vm()
-    assert len(probe_calls) == 1, (
-        f"SSH probe must fire once on reuse, got {len(probe_calls)}"
-    )
+    assert len(probe_calls) == 1, f"SSH probe must fire once on reuse, got {len(probe_calls)}"
     assert probe_calls[0]["timeout"] == 30, (
         f"reuse-timeout must be 30s, got {probe_calls[0]['timeout']}"
     )
@@ -1037,17 +1204,15 @@ def test_dry_run_provider_skips_ssh_probe(tmp_path, fake_key_factory):
         return True
 
     provider = DryRunProvider()
-    assert provider.skip_ssh_probe is True, (
-        "DryRunProvider.skip_ssh_probe must be True"
-    )
+    assert provider.skip_ssh_probe is True, "DryRunProvider.skip_ssh_probe must be True"
     mgr = make_manager(
         tmp_path,
         provider=provider,
         fake_key_factory=fake_key_factory,
         ssh_probe=recording_probe,
     )
-    mgr.ensure_vm()          # provision path
-    mgr.ensure_vm()          # reuse path
+    mgr.ensure_vm()  # provision path
+    mgr.ensure_vm()  # reuse path
     assert probe_calls == [], (
         f"ssh_probe must not fire when skip_ssh_probe is set, got {probe_calls}"
     )
@@ -1065,13 +1230,9 @@ def test_ensure_vm_reprovisions_when_ssh_unreachable_on_reuse(tmp_path, fake_key
     )
     first = mgr.ensure_vm()
     second = mgr.ensure_vm()
-    assert second.id != first.id, (
-        f"SSH-unreachable VM must be replaced, both were {first.id!r}"
-    )
+    assert second.id != first.id, f"SSH-unreachable VM must be replaced, both were {first.id!r}"
     provisions = [c for c in provider.calls if c["op"] == "provision"]
-    assert len(provisions) == 2, (
-        f"reprovisioning must provision twice, got {len(provisions)}"
-    )
+    assert len(provisions) == 2, f"reprovisioning must provision twice, got {len(provisions)}"
 
 
 def test_ensure_vm_proceeds_when_ssh_not_ready_after_provisioning(tmp_path, fake_key_factory):
@@ -1162,9 +1323,7 @@ def test_ensure_vm_updates_state_ip_on_reuse(tmp_path, fake_key_factory):
 
     # Simulate the VM getting a new IP after a reboot/reassignment.
     new_ip = "192.168.99.77"
-    provider._vms[first.id] = dataclasses.replace(
-        provider._vms[first.id], public_ip=new_ip
-    )
+    provider._vms[first.id] = dataclasses.replace(provider._vms[first.id], public_ip=new_ip)
 
     # ensure_vm reuses the VM (it's still running + SSH-reachable).
     second = mgr.ensure_vm()
