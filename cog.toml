@@ -55,11 +55,18 @@ bump_patch = true
 # NOTE: cocogitto 7.0 has a bug — it writes the prepare-commit-msg hook as
 # "pre-commit-msg" (wrong), but git and cog commit look for "prepare-commit-msg".
 # The justfile `cog-install-hooks` recipe renames it after install.
+#
+# Shell semantics: `! command -v X >/dev/null 2>&1 || X` means:
+#   - binary missing  → exit 0 (skip, git-mit is optional)
+#   - binary present, X exits 0 → exit 0 (allow commit)
+#   - binary present, X exits 1 → exit 1 (block commit)
+# The previous `command -v X && X || true` always exited 0, silently
+# swallowing stale-author blocks from mit-pre-commit.
 [git_hooks.pre-commit]
-script = "command -v mit-pre-commit >/dev/null 2>&1 && mit-pre-commit || true"
+script = "! command -v mit-pre-commit >/dev/null 2>&1 || mit-pre-commit"
 
 [git_hooks.pre-prepare-commit-msg]
-script = "command -v mit-prepare-commit-msg >/dev/null 2>&1 && mit-prepare-commit-msg $1 $2 $3 || true"
+script = "! command -v mit-prepare-commit-msg >/dev/null 2>&1 || mit-prepare-commit-msg $1 $2 $3"
 
 [git_hooks.commit-msg]
-script = "cog verify --file $1 && (command -v mit-commit-msg >/dev/null 2>&1 && mit-commit-msg $1 || true)"
+script = "cog verify --file $1 && (! command -v mit-commit-msg >/dev/null 2>&1 || mit-commit-msg $1)"
