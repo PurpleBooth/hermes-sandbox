@@ -32,9 +32,9 @@ hermes config set terminal.backend ssh >/dev/null
 # provision step.
 SPECS=(README.md docs/references/*.md docs/tasks/dry-run-provider.md docs/tasks/concurrent-sessions.md docs/tasks/shared-session.md)
 
-if command -v qemu-system-x86_64 >/dev/null 2>&1 \
-	&& { command -v genisoimage >/dev/null 2>&1 || command -v mkisofs >/dev/null 2>&1 \
-	     || command -v xorrisofs >/dev/null 2>&1 || command -v xorriso >/dev/null 2>&1; }; then
+if command -v qemu-system-x86_64 >/dev/null 2>&1 &&
+	{ command -v genisoimage >/dev/null 2>&1 || command -v mkisofs >/dev/null 2>&1 ||
+		command -v xorrisofs >/dev/null 2>&1 || command -v xorriso >/dev/null 2>&1; }; then
 	SPECS+=(docs/tasks/qemu-provider.md)
 else
 	echo "qemu-system-x86_64 or an ISO builder (genisoimage/mkisofs/xorriso) not found — skipping QEMU provider task spec"
@@ -76,4 +76,3 @@ done
 exec specdown run \
 	"${ENV_ARGS[@]}" \
 	"${SPECS[@]}"
-

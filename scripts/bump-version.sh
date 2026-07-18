@@ -11,7 +11,7 @@ version="${version#v}"
 
 pyproject="pyproject.toml"
 
-if [[ ! -f "$pyproject" ]]; then
+if [[ ! -f $pyproject ]]; then
 	echo "error: $pyproject not found" >&2
 	exit 1
 fi
