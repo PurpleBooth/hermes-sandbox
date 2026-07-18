@@ -201,6 +201,38 @@ class TestSandboxTeardownHandler:
         data = json.loads(result)
         assert data["status"] == "ok"
 
+    def test_teardown_with_vm_id_refuses_non_sandbox_vm(self, configured_manager):
+        """CRITICAL-1: teardown must refuse a vm_id that lacks the hermes-sandbox
+        label so the tool cannot destroy arbitrary VMs on the cloud account."""
+        provider = configured_manager.provider
+        # A VM NOT carrying the hermes-sandbox=true label — e.g. a production
+        # server, another user's VM, or any infrastructure sharing the API token.
+        provider.provision(
+            name="production-server",
+            instance_type="2cpu-2gb",
+            region="local",
+            image="img",
+            ssh_public_key="k",
+            labels={"env": "production"},  # NOT the sandbox label
+        )
+        non_sandbox_vm_id = next(
+            vm.id
+            for vm in provider._vms.values()
+            if vm.extra.get("labels", {}).get("env") == "production"
+        )
+        result = hermes_sandbox._sandbox_teardown_handler({"vm_id": non_sandbox_vm_id})
+        data = json.loads(result)
+        assert "error" in data, f"expected an error, got: {data}"
+        assert "not a sandbox VM" in data["error"]
+        # provider.teardown must NOT have been called for this vm_id.
+        teardown_calls = [c for c in provider.calls if c["op"] == "teardown"]
+        assert all(c["vm_id"] != non_sandbox_vm_id for c in teardown_calls), (
+            f"provider.teardown must not be called for a non-sandbox VM; "
+            f"teardown calls: {teardown_calls}"
+        )
+        # The VM must still exist — nothing was destroyed.
+        assert provider.get(non_sandbox_vm_id).id == non_sandbox_vm_id
+
 
 class TestSandboxRecreateHandler:
     """Happy-path: sandbox_recreate destroys + provisions in one step."""
