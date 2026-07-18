@@ -328,10 +328,11 @@ Subcommands:
   cleanup     Tear down stray VMs not tracked by any session
   reap        Tear down the VM if unused for longer than the TTL
   enable      Set terminal.backend=ssh in config.yaml (run once)
+  netrc       Manage VM git HTTPS credentials (show|render|write)
   help        This message
 
 Configure via env vars (HCLOUD_TOKEN / DIGITALOCEAN_TOKEN,
-SANDBOX_PROVIDER, SANDBOX_INSTANCE_TYPE, ...).
+SANDBOX_PROVIDER, SANDBOX_INSTANCE_TYPE, SANDBOX_NETRC, ...).
 """
 
 
@@ -341,10 +342,22 @@ def _handle_slash(raw_args: str) -> str | None:
         return _HELP
     sub = argv[0]
 
-    # `enable` and `available` work without a configured provider — they
-    # only touch config.yaml / the provider registry, not a live VM.
+    # `enable`, `available`, and most `netrc` ops work without a configured
+    # provider — they only touch config.yaml / the host env, not a live VM.
     if sub == "enable":
         return _enable_ssh_backend()
+
+    if sub == "netrc":
+        from .netrc_tool import handle_netrc_command
+
+        # `write` needs a manager; show/render/help do not.  Avoid building a
+        # manager (and importing hermes_constants) unless the subcommand needs
+        # a live VM — keeps host-only ops usable even when Hermes core isn't
+        # importable (unit tests, bare CLI).
+        netrc_args = argv[1:]
+        needs_manager = bool(netrc_args) and netrc_args[0] == "write"
+        manager = _manager_or_build() if needs_manager else None
+        return handle_netrc_command(netrc_args, manager=manager)
 
     manager = _manager_or_build()
     if manager is None:
@@ -431,6 +444,15 @@ def _setup_cli(parser: argparse.ArgumentParser) -> None:
     sub.add_parser("reap", help="Tear down the VM if unused for longer than the TTL")
     sub.add_parser("enable", help="Set terminal.backend=ssh in config.yaml")
     sub.add_parser("available", help="List registered providers")
+    netrc_parser = sub.add_parser(
+        "netrc",
+        help="Manage VM git HTTPS credentials via SANDBOX_NETRC",
+    )
+    netrc_sub = netrc_parser.add_subparsers(dest="hermes_sandbox_netrc_action")
+    netrc_sub.add_parser("show", help="Show configured machines (passwords redacted)")
+    netrc_sub.add_parser("render", help="Preview resolved .netrc (passwords redacted)")
+    netrc_sub.add_parser("write", help="Write /home/hermes/.netrc onto the live VM")
+    netrc_sub.add_parser("help", help="Show netrc help")
 
 
 def _handle_cli(args: argparse.Namespace) -> int:
@@ -440,6 +462,10 @@ def _handle_cli(args: argparse.Namespace) -> int:
         from .provider import available_providers
 
         print("Registered providers: " + ", ".join(available_providers()))
+        return 0
+    if action == "netrc":
+        netrc_action = getattr(args, "hermes_sandbox_netrc_action", None) or "help"
+        print(_handle_slash(f"netrc {netrc_action}"))
         return 0
     # Reuse the slash handler for the common ops.
     print(_handle_slash(action))
@@ -609,6 +635,34 @@ _SANDBOX_CLEANUP_SCHEMA = {
 }
 
 
+_SANDBOX_NETRC_SCHEMA = {
+    "name": "sandbox_netrc",
+    "description": (
+        "Manage git HTTPS credentials on the sandbox VM via SANDBOX_NETRC. "
+        "Actions: show (list configured machines, passwords redacted), "
+        "render (preview resolved .netrc body, passwords redacted), "
+        "write (push /home/hermes/.netrc onto the live VM now, mode 0600). "
+        "Prefer this over SANDBOX_FORWARD_ENV for git auth. Config lives on "
+        "the host: SANDBOX_NETRC=github.com:GITHUB_TOKEN,codeberg.org:CODEBERG_TOKEN."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["show", "render", "write"],
+                "description": (
+                    "show = list configured machines; "
+                    "render = preview .netrc body (redacted); "
+                    "write = install .netrc on the live VM."
+                ),
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
 def _sandbox_status_handler(args: dict[str, Any], **kwargs: Any) -> str:
     """Handler for sandbox_status tool."""
     manager = _manager_or_build()
@@ -747,6 +801,47 @@ def _sandbox_cleanup_handler(args: dict[str, Any], **kwargs: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _sandbox_netrc_handler(args: dict[str, Any], **kwargs: Any) -> str:
+    """Handler for sandbox_netrc tool."""
+    from .config import SandboxConfig
+    from .netrc_tool import handle_netrc_command, render_netrc, show_netrc_status
+
+    action = args.get("action") or "show"
+    if action not in {"show", "render", "write"}:
+        return json.dumps({"error": f"Unknown action: {action}. Use show|render|write."})
+
+    config = SandboxConfig.from_env(dict(os.environ))
+
+    if action == "show":
+        return json.dumps({"status": "ok", **show_netrc_status(config)}, default=str)
+
+    if action == "render":
+        body = render_netrc(config.netrc_specs)
+        if body is None:
+            return json.dumps(
+                {
+                    "status": "empty",
+                    "message": (
+                        "No resolvable netrc entries. Set SANDBOX_NETRC and "
+                        "password env vars (e.g. GITHUB_TOKEN)."
+                    ),
+                }
+            )
+        redacted = []
+        for line in body.splitlines():
+            if line.startswith("password "):
+                redacted.append("password ***")
+            else:
+                redacted.append(line)
+        return json.dumps({"status": "ok", "netrc": "\n".join(redacted)})
+
+    # write
+    manager = _manager_or_build()
+    msg = handle_netrc_command(["write"], manager=manager)
+    ok = msg.startswith("[sandbox] Wrote")
+    return json.dumps({"status": "ok" if ok else "error", "message": msg})
+
+
 def _eager_wire_ssh_env() -> None:
     """Set TERMINAL_SSH_* from state.json at plugin load time.
 
@@ -808,7 +903,7 @@ def register(ctx: Any) -> None:
         "sandbox",
         handler=_handle_slash,
         description="Cloud-VM terminal sandbox: provision/status/teardown.",
-        args_hint="<status|provision|teardown|list|recreate|cleanup|enable>",
+        args_hint="<status|provision|teardown|list|recreate|cleanup|enable|netrc>",
     )
     ctx.register_cli_command(
         "sandbox",
@@ -853,6 +948,12 @@ def register(ctx: Any) -> None:
         toolset="sandbox",
         schema=_SANDBOX_CLEANUP_SCHEMA,
         handler=_sandbox_cleanup_handler,
+    )
+    ctx.register_tool(
+        name="sandbox_netrc",
+        toolset="sandbox",
+        schema=_SANDBOX_NETRC_SCHEMA,
+        handler=_sandbox_netrc_handler,
     )
     _eager_wire_ssh_env()
     _start_reaper_thread()
